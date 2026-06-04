@@ -135,7 +135,7 @@ function App() {
           value={manualAccessKey}
           onChange={(e) => setManualAccessKey(e.target.value)}
           placeholder="Cole a chave de acesso (44 dígitos)"
-          maxLength="44"
+          maxLength="60"
         />
         <button onClick={handleManualConsult} className="btn">
           Consultar
