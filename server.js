@@ -1,0 +1,167 @@
+import express from 'express';
+import { load } from 'cheerio';
+
+const app = express();
+const port = process.env.PORT || 3333;
+
+app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
+
+const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
+
+const parseItemRow = (row, $) => {
+  const cols = $(row)
+    .find('td')
+    .toArray()
+    .map((td) => normalizeText($(td).text()));
+  if (cols.length < 4) return null;
+
+  const itemMatch = cols[0].match(/^(.*?)\s*\(Código:\s*([^\)]+)\)/i);
+  return {
+    descricao: itemMatch ? normalizeText(itemMatch[1]) : cols[0],
+    codigo: itemMatch ? normalizeText(itemMatch[2]) : null,
+    quantidade: cols[1].replace(/.*?:\s*/, ''),
+    unidade: cols[2].replace(/.*?:\s*/, ''),
+    valor_total: cols[3].replace(/.*?:\s*/, ''),
+  };
+};
+
+const extractTableRow = ($table, $) => {
+  const row = $table.find('tbody tr').first();
+  return row.find('td').toArray().map((td) => normalizeText($(td).text()));
+};
+
+const parseHtml = (html) => {
+  const $ = load(html);
+
+  const emitenteSection = $("h5:contains('Emitente')").first();
+  const emitenteTable = emitenteSection.nextAll('table').first();
+  const emitenteCells = extractTableRow(emitenteTable, $);
+
+  const dataEmissaoTable = $("th:contains('Data Emissão')").closest('table');
+  const dataEmissaoCells = extractTableRow(dataEmissaoTable, $);
+
+  const valorTotalServicoTable = $("th:contains('Valor total do serviço')").closest('table');
+  const valorTotalServicoCells = extractTableRow(valorTotalServicoTable, $);
+
+  const protocoloTable = $("th:contains('Protocolo')").closest('table');
+  const protocoloCells = extractTableRow(protocoloTable, $);
+
+  const chaveAcessoPanel = $(".panel-title:contains('Chave de acesso')")
+    .closest('.panel')
+    .find('div.collapse tbody tr td')
+    .first();
+  const chaveAcesso = normalizeText(chaveAcessoPanel.text());
+
+  const totals = {};
+  $('div.row').each((_, element) => {
+    const strongs = $(element)
+      .find('strong')
+      .toArray()
+      .map((el) => normalizeText($(el).text()));
+    if (strongs.length === 2 && strongs[0] !== strongs[1]) {
+      totals[strongs[0]] = strongs[1];
+    }
+  });
+
+  const itens = [];
+  $('#myTable tr').each((_, row) => {
+    const item = parseItemRow(row, $);
+    if (item) itens.push(item);
+  });
+
+  return {
+    emitente: {
+      nome: emitenteCells[0] || null,
+      cnpj: emitenteCells[1] || null,
+      inscricao_estadual: emitenteCells[2] || null,
+      uf: emitenteCells[3] || null,
+    },
+    nota: {
+      modelo: dataEmissaoCells[0] || null,
+      serie: dataEmissaoCells[1] || null,
+      numero: dataEmissaoCells[2] || null,
+      data_emissao: dataEmissaoCells[3] || null,
+      valor_total_servico: valorTotalServicoCells[0] || null,
+      protocolo: protocoloCells[0] || null,
+    },
+    chave_acesso: chaveAcesso || null,
+    totais: {
+      quantidade_total_itens: totals['Qtde total de ítens'] || null,
+      valor_total: totals['Valor total R$'] || null,
+      valor_pago: totals['Valor pago R$'] || null,
+      forma_pagamento: totals['Forma de Pagamento'] || null,
+    },
+    itens,
+  };
+};
+
+const fetchAndParseUrl = async (url) => {
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    },
+  });
+
+  if (!response.ok) {
+    const message = `Falha ao obter a página da SEFAZ-MG: ${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
+
+  const html = await response.text();
+  return parseHtml(html);
+};
+
+app.post('/consulta-qrcode', async (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).json({ error: 'A propriedade "url" é obrigatória.' });
+  }
+
+  try {
+    new URL(url);
+  } catch (error) {
+    return res.status(400).json({ error: 'URL inválida.' });
+  }
+
+  try {
+    const resultado = await fetchAndParseUrl(url);
+    return res.json(resultado);
+  } catch (error) {
+    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.type('text/plain').send(
+    'API NFC-e backend. Use GET /consulta-qrcode?url=<URL> ou POST /consulta-qrcode com { "url": "..." }'
+  );
+});
+
+app.get('/consulta-qrcode', async (req, res) => {
+  const { url } = req.query;
+  if (!url) {
+    return res.status(400).json({ error: 'O parâmetro "url" é obrigatório.' });
+  }
+
+  try {
+    new URL(url);
+  } catch (error) {
+    return res.status(400).json({ error: 'URL inválida.' });
+  }
+
+  try {
+    const resultado = await fetchAndParseUrl(url);
+    return res.json(resultado);
+  } catch (error) {
+    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Backend NFC-e rodando em http://localhost:${port}`);
+});

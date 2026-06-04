@@ -182,3 +182,69 @@
     border-right-color: var(--border);
   }
 }
+
+/* App specific styles for NFC-e display and responsiveness */
+.app-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 18px;
+  box-sizing: border-box;
+}
+.reader-container {
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+.info-row {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  justify-content: space-between;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.last-read {
+  flex: 1 1 60%;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 35%;
+  justify-content: flex-end;
+}
+.manual-consult {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+.manual-consult input {
+  flex: 1 1 auto;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}
+.btn {
+  background: #0b5cff;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-ghost { background: transparent; color: #333; border: 1px solid #ccc; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; }
+.error { color: #b00020; margin-top: 10px; }
+.nfe-card { margin-top: 18px; border: 1px solid #e6e6e6; padding: 14px; border-radius: 8px; background: #fff; }
+.section { margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.table-wrap { overflow-x: auto; }
+.nfe-table { width: 100%; border-collapse: collapse; }
+.nfe-table th, .nfe-table td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+
+@media (max-width: 600px) {
+  .grid { grid-template-columns: 1fr; }
+  .actions { justify-content: flex-start; }
+  .reader-container { max-width: 100%; }
+}
