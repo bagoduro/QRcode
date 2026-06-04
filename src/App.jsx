@@ -17,11 +17,19 @@ function App() {
     }
   };
 
+  const API_BASE = import.meta.env.VITE_API_BASE || '';
+
   const fetchNfe = async (url) => {
     try {
-      const response = await fetch(
-        `http://localhost:3333/consulta-qrcode?url=${encodeURIComponent(url)}`
-      );
+      setError(null);
+      const endpoint = API_BASE
+        ? `${API_BASE.replace(/\/$/, '')}/consulta-qrcode?url=${encodeURIComponent(url)}`
+        : `/api/consulta-qrcode?url=${encodeURIComponent(url)}`;
+
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
 
       if (!response.ok) {
         const body = await response.text();
