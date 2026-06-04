@@ -6,19 +6,7 @@ function App() {
   const [nfeData, setNfeData] = useState(null);
   const [error, setError] = useState(null);
   const [manualUrl, setManualUrl] = useState("");
-  const [manualAccessKey, setManualAccessKey] = useState("");
-  const [selectedState, setSelectedState] = useState("PE");
   const lastScannedUrl = useRef(null);
-
-  // Mapeamento de SEFAZ por estado
-  const sefazUrls = {
-    PE: "https://consulta.sefaz.pe.gov.br/nfce/consulta?chAcesso=",
-    SP: "https://nfce.fazenda.sp.gov.br/consulta?chAcesso=",
-    MG: "https://nfce.fazenda.mg.gov.br/portal/consulta?chAcesso=",
-    BA: "https://nfce.sefaz.ba.gov.br/consulta?chAcesso=",
-    RS: "https://nfce.sefaz.rs.gov.br/consulta?chAcesso=",
-    RJ: "https://nfce.sefaz.rj.gov.br/consulta?chAcesso=",
-  };
 
   const isValidUrl = (text) => {
     try {
@@ -27,18 +15,6 @@ function App() {
     } catch {
       return false;
     }
-  };
-
-  const isValidAccessKey = (text) => {
-    // Chave de acesso tem 44 dígitos
-    return /^\d{44}$/.test(text.replace(/\D/g, ''));
-  };
-
-  const buildUrlFromAccessKey = (accessKey, state = "PE") => {
-    // Remove caracteres não numéricos
-    const cleanKey = accessKey.replace(/\D/g, '');
-    const baseUrl = sefazUrls[state] || sefazUrls.PE;
-    return `${baseUrl}${cleanKey}`;
   };
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -103,23 +79,12 @@ function App() {
   };
 
   const handleManualConsult = () => {
-    let urlToFetch = null;
-
-    // Se tiver chave de acesso, usar ela
-    if (manualAccessKey && isValidAccessKey(manualAccessKey)) {
-      urlToFetch = buildUrlFromAccessKey(manualAccessKey, selectedState);
-    } 
-    // Senão, tentar usar URL diretamente
-    else if (manualUrl && isValidUrl(manualUrl)) {
-      urlToFetch = manualUrl;
-    } 
-    else {
-      setError('Cole a URL do QR Code ou a chave de acesso (44 dígitos).');
-      return;
+    if (manualUrl && isValidUrl(manualUrl)) {
+      lastScannedUrl.current = manualUrl;
+      fetchNfe(manualUrl);
+    } else {
+      setError('URL inválida.');
     }
-
-    lastScannedUrl.current = urlToFetch;
-    fetchNfe(urlToFetch);
   };
 
   const clearAll = () => {
@@ -128,7 +93,6 @@ function App() {
     setError(null);
     lastScannedUrl.current = null;
     setManualUrl("");
-    setManualAccessKey("");
   };
 
   return (
@@ -160,35 +124,7 @@ function App() {
           placeholder="Cole a URL do QR Code aqui"
         />
         <button onClick={handleManualConsult} className="btn">
-          Consultar por URL
-        </button>
-      </div>
-
-      <div className="manual-consult" style={{ marginTop: "15px" }}>
-        <h4 style={{ marginBottom: "10px" }}>Ou use a chave de acesso:</h4>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "10px" }}>
-          <select 
-            value={selectedState} 
-            onChange={(e) => setSelectedState(e.target.value)}
-            style={{ flex: "0 0 80px" }}
-          >
-            <option value="PE">PE</option>
-            <option value="SP">SP</option>
-            <option value="MG">MG</option>
-            <option value="BA">BA</option>
-            <option value="RS">RS</option>
-            <option value="RJ">RJ</option>
-          </select>
-          <input
-            value={manualAccessKey}
-            onChange={(e) => setManualAccessKey(e.target.value)}
-            placeholder="Cole a chave de acesso (44 dígitos)"
-            maxLength="60"
-            style={{ flex: 1 }}
-          />
-        </div>
-        <button onClick={handleManualConsult} className="btn">
-          Consultar por Chave
+          Consultar
         </button>
       </div>
 
