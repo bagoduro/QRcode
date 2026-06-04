@@ -5,7 +5,7 @@ function App() {
   const [scanResult, setScanResult] = useState(null);
   const [nfeData, setNfeData] = useState(null);
   const [error, setError] = useState(null);
-  const [manualUrl, setManualUrl] = useState("");
+  const [manualAccessKey, setManualAccessKey] = useState("");
   const lastScannedUrl = useRef(null);
 
   const isValidUrl = (text) => {
@@ -15,6 +15,18 @@ function App() {
     } catch {
       return false;
     }
+  };
+
+  const isValidAccessKey = (text) => {
+    // Chave de acesso tem 44 dígitos
+    return /^\d{44}$/.test(text.replace(/\D/g, ''));
+  };
+
+  const buildUrlFromAccessKey = (accessKey) => {
+    // Remove caracteres não numéricos
+    const cleanKey = accessKey.replace(/\D/g, '');
+    // Formata como: 35.24.65.201:8000/nfce/consulta?chAcesso=...
+    return `https://consulta.sefaz.pe.gov.br/nfce/consulta?chAcesso=${cleanKey}`;
   };
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -79,11 +91,12 @@ function App() {
   };
 
   const handleManualConsult = () => {
-    if (manualUrl && isValidUrl(manualUrl)) {
-      lastScannedUrl.current = manualUrl;
-      fetchNfe(manualUrl);
+    if (manualAccessKey && isValidAccessKey(manualAccessKey)) {
+      const url = buildUrlFromAccessKey(manualAccessKey);
+      lastScannedUrl.current = url;
+      fetchNfe(url);
     } else {
-      setError('URL inválida.');
+      setError('Chave de acesso inválida. Use 44 dígitos.');
     }
   };
 
@@ -92,7 +105,7 @@ function App() {
     setNfeData(null);
     setError(null);
     lastScannedUrl.current = null;
-    setManualUrl("");
+    setManualAccessKey("");
   };
 
   return (
@@ -119,9 +132,10 @@ function App() {
 
       <div className="manual-consult">
         <input
-          value={manualUrl}
-          onChange={(e) => setManualUrl(e.target.value)}
-          placeholder="Cole a URL do QR Code aqui"
+          value={manualAccessKey}
+          onChange={(e) => setManualAccessKey(e.target.value)}
+          placeholder="Cole a chave de acesso (44 dígitos)"
+          maxLength="44"
         />
         <button onClick={handleManualConsult} className="btn">
           Consultar
