@@ -1,0 +1,28 @@
+{
+  "buildCommand": "npm install",
+  "devCommand": "npm run dev",
+  "functions": {
+    "server.js": {
+      "runtime": "nodejs20.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/consulta-qrcode",
+      "destination": "/server.js"
+    },
+    {
+      "source": "/consulta-qrcode",
+      "destination": "/server.js",
+      "methods": ["GET", "POST"]
+    },
+    {
+      "source": "/health",
+      "destination": "/server.js"
+    }
+  ]
+}

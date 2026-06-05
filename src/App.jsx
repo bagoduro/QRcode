@@ -17,7 +17,7 @@ function App() {
     }
   };
 
-  const API_BASE = import.meta.env.VITE_API_BASE || '';
+  const API_BASE = '/api';
 
   const fetchNfe = async (url) => {
     try {
