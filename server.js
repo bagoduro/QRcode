@@ -1,5 +1,7 @@
+import 'dotenv/config';
 import express from 'express';
 import { load } from 'cheerio';
+import { getDb } from './db.js';
 
 const app = express();
 const port = process.env.PORT || 3333;
@@ -28,6 +30,22 @@ const parseItemRow = (row, $) => {
     unidade: cols[2].replace(/.*?:\s*/, ''),
     valor_total: cols[3].replace(/.*?:\s*/, ''),
   };
+};
+
+const savePurchase = async (url, resultado) => {
+  const db = await getDb();
+  const purchases = db.collection('purchases');
+  const purchase = {
+    url,
+    createdAt: new Date(),
+    emitente: resultado.emitente,
+    nota: resultado.nota,
+    chave_acesso: resultado.chave_acesso,
+    totais: resultado.totais,
+    itens: resultado.itens,
+  };
+
+  await purchases.insertOne(purchase);
 };
 
 const extractTableRow = ($table, $) => {
@@ -130,6 +148,7 @@ app.post('/consulta-qrcode', async (req, res) => {
 
   try {
     const resultado = await fetchAndParseUrl(url);
+    await savePurchase(url, resultado);
     return res.json(resultado);
   } catch (error) {
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
@@ -156,9 +175,20 @@ app.get('/consulta-qrcode', async (req, res) => {
 
   try {
     const resultado = await fetchAndParseUrl(url);
+    await savePurchase(url, resultado);
     return res.json(resultado);
   } catch (error) {
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+  }
+});
+
+app.get('/health', async (req, res) => {
+  try {
+    const db = await getDb();
+    await db.command({ ping: 1 });
+    res.json({ status: 'ok', db: 'connected' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', error: error.message });
   }
 });
 
