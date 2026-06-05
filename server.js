@@ -33,19 +33,27 @@ const parseItemRow = (row, $) => {
 };
 
 const savePurchase = async (url, resultado) => {
-  const db = await getDb();
-  const purchases = db.collection('purchases');
-  const purchase = {
-    url,
-    createdAt: new Date(),
-    emitente: resultado.emitente,
-    nota: resultado.nota,
-    chave_acesso: resultado.chave_acesso,
-    totais: resultado.totais,
-    itens: resultado.itens,
-  };
+  try {
+    console.log('[savePurchase] Iniciando salvamento...', { url });
+    const db = await getDb();
+    console.log('[savePurchase] Conectado ao banco');
+    const purchases = db.collection('purchases');
+    const purchase = {
+      url,
+      createdAt: new Date(),
+      emitente: resultado.emitente,
+      nota: resultado.nota,
+      chave_acesso: resultado.chave_acesso,
+      totais: resultado.totais,
+      itens: resultado.itens,
+    };
 
-  await purchases.insertOne(purchase);
+    const result = await purchases.insertOne(purchase);
+    console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
+  } catch (error) {
+    console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
+    throw error;
+  }
 };
 
 const extractTableRow = ($table, $) => {
@@ -136,6 +144,8 @@ const fetchAndParseUrl = async (url) => {
 
 app.post('/consulta-qrcode', async (req, res) => {
   const { url } = req.body;
+  console.log('[POST /consulta-qrcode] Requisição recebida:', { url });
+  
   if (!url) {
     return res.status(400).json({ error: 'A propriedade "url" é obrigatória.' });
   }
@@ -151,6 +161,7 @@ app.post('/consulta-qrcode', async (req, res) => {
     await savePurchase(url, resultado);
     return res.json(resultado);
   } catch (error) {
+    console.error('[POST /consulta-qrcode] Erro:', error.message);
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
   }
 });
@@ -163,6 +174,8 @@ app.get('/', (req, res) => {
 
 app.get('/consulta-qrcode', async (req, res) => {
   const { url } = req.query;
+  console.log('[GET /consulta-qrcode] Requisição recebida:', { url });
+  
   if (!url) {
     return res.status(400).json({ error: 'O parâmetro "url" é obrigatório.' });
   }
@@ -178,6 +191,7 @@ app.get('/consulta-qrcode', async (req, res) => {
     await savePurchase(url, resultado);
     return res.json(resultado);
   } catch (error) {
+    console.error('[GET /consulta-qrcode] Erro:', error.message);
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
   }
 });
@@ -194,4 +208,8 @@ app.get('/health', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Backend NFC-e rodando em http://localhost:${port}`);
+  console.log('[Startup] Variáveis de ambiente:');
+  console.log('[Startup] PORT:', port);
+  console.log('[Startup] MONGO_URI definida:', !!process.env.MONGO_URI);
+  console.log('[Startup] MONGO_DB_NAME:', process.env.MONGO_DB_NAME || 'leitor_qr (padrão)');
 });
