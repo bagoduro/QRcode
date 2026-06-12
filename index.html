@@ -1,13 +1,821 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>leitor-qr</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Leitor QR - Histórico de Compras</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css" />
+  <style>
+    :root {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f4f3ef;
+      --bg-tertiary: #ebe9e3;
+      --text-primary: #1f1f1d;
+      --text-secondary: #6b6a66;
+      --text-tertiary: #9a9893;
+      --border: rgba(0,0,0,0.1);
+      --border-strong: rgba(0,0,0,0.18);
+      --accent: #0F6E56;
+      --accent-bg: #E1F5EE;
+      --accent-text: #085041;
+      --danger: #993C1D;
+      --danger-bg: #FAECE7;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .app {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 4rem;
+    }
+
+    header {
+      padding: 1rem 0 1.5rem;
+    }
+
+    header h1 {
+      font-size: 22px;
+      font-weight: 500;
+      margin: 0 0 4px;
+    }
+
+    header p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+
+    nav.tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-lg);
+      padding: 4px;
+      margin-bottom: 1.5rem;
+    }
+
+    nav.tabs button {
+      flex: 1;
+      border: none;
+      background: transparent;
+      padding: 10px 8px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    nav.tabs button.active {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+
+    nav.tabs i { font-size: 16px; }
+
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    .card {
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .card h2 {
+      font-size: 16px;
+      font-weight: 500;
+      margin: 0 0 1rem;
+    }
+
+    .field { margin-bottom: 12px; }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    input[type="text"], select {
+      width: 100%;
+      height: 40px;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 0 12px;
+      font-size: 14px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+    }
+
+    input[type="text"]:focus, select:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--accent-bg);
+      border-color: var(--accent);
+    }
+
+    .input-row { display: flex; gap: 8px; }
+    .input-row input { flex: 1; }
+
+    button.btn {
+      border: 0.5px solid var(--border-strong);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border-radius: var(--radius-md);
+      height: 40px;
+      padding: 0 16px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    button.btn:hover { background: var(--bg-secondary); }
+    button.btn:active { transform: scale(0.98); }
+
+    button.btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    button.btn.primary:hover { background: #0c5a45; }
+
+    button.btn.full { width: 100%; justify-content: center; }
+
+    .helper {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 4px;
+    }
+
+    .scanner-frame {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+
+    .scanner-frame i {
+      font-size: 40px;
+      color: var(--text-tertiary);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .scanner-frame p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 12px;
+    }
+
+    #qr-reader {
+      width: 100%;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 10px 0;
+      border-bottom: 0.5px solid var(--border);
+      gap: 12px;
+    }
+
+    .result-row:last-child { border-bottom: none; }
+
+    .result-row .info p:first-child {
+      font-size: 14px;
+      font-weight: 500;
+      margin: 0 0 2px;
+    }
+
+    .result-row .info p {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin: 0;
+    }
+
+    .result-row .value {
+      font-size: 15px;
+      font-weight: 500;
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: var(--radius-md);
+      margin-top: 4px;
+    }
+
+    .badge.best {
+      background: var(--accent-bg);
+      color: var(--accent-text);
+    }
+
+    .badge.last {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 1rem;
+    }
+
+    .metric {
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      padding: 1rem;
+    }
+
+    .metric .label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin: 0 0 4px;
+    }
+
+    .metric .value {
+      font-size: 22px;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem 1rem;
+      color: var(--text-tertiary);
+    }
+
+    .empty-state i { font-size: 32px; display: block; margin-bottom: 8px; }
+    .empty-state p { font-size: 13px; margin: 0; }
+
+    .item-list { display: flex; flex-direction: column; }
+
+    .item-card {
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .item-card:hover { border-color: var(--border-strong); }
+
+    .item-card .top-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .item-card .top-row p {
+      font-size: 14px;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    .item-card .top-row span {
+      font-size: 13px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .item-card .meta {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    .item-card .top-row i.chevron {
+      font-size: 16px;
+      color: var(--text-tertiary);
+      transition: transform 0.15s;
+      margin-left: 4px;
+    }
+
+    .item-card.expanded .top-row i.chevron { transform: rotate(180deg); }
+
+    .nota-itens {
+      display: none;
+      border-top: 0.5px solid var(--border);
+      margin-top: 10px;
+      padding-top: 10px;
+    }
+
+    .item-card.expanded .nota-itens { display: block; }
+
+    .nota-itens .result-row { padding: 6px 0; }
+    .nota-itens .result-row .info p:first-child { font-size: 13px; }
+    .nota-itens .result-row .value { font-size: 13px; font-weight: 400; }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 1.5rem;
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .spinner {
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--text-secondary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .alert {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 1rem;
+    }
+
+    .receipt-summary {
+      border-top: 0.5px solid var(--border);
+      margin-top: 12px;
+      padding-top: 12px;
+    }
+
+    .receipt-summary .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .receipt-summary .row.total {
+      font-weight: 500;
+      font-size: 15px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 480px) {
+      nav.tabs button span { display: none; }
+      .summary-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Histórico de compras</h1>
+      <p>Leia notas fiscais por QR code e compare preços entre estabelecimentos</p>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="leitor"><i class="ti ti-qrcode"></i><span>Ler nota</span></button>
+      <button class="tab-btn" data-tab="buscar"><i class="ti ti-search"></i><span>Buscar item</span></button>
+      <button class="tab-btn" data-tab="recorrentes"><i class="ti ti-repeat"></i><span>Recorrentes</span></button>
+      <button class="tab-btn" data-tab="historico"><i class="ti ti-receipt"></i><span>Compras</span></button>
+    </nav>
+
+    <!-- Aba: Ler nota (QR code) -->
+    <section class="panel active" id="panel-leitor">
+      <div class="card">
+        <h2>Escanear cupom fiscal</h2>
+
+        <div class="scanner-frame">
+          <i class="ti ti-camera" aria-hidden="true"></i>
+          <p>Aponte a câmera para o QR code da nota fiscal</p>
+          <button class="btn primary full" id="btn-start-scan">
+            <i class="ti ti-player-play"></i> Iniciar câmera
+          </button>
+          <div id="qr-reader" style="display:none; margin-top:12px;"></div>
+        </div>
+
+        <div class="field">
+          <label for="input-url">Ou cole o link da nota (URL do QR code)</label>
+          <div class="input-row">
+            <input type="text" id="input-url" placeholder="https://portalsped.fazenda.mg.gov.br/..." />
+            <button class="btn primary" id="btn-consultar">
+              <i class="ti ti-search"></i> Consultar
+            </button>
+          </div>
+        </div>
+
+        <div id="leitor-result"></div>
+      </div>
+    </section>
+
+    <!-- Aba: Buscar item -->
+    <section class="panel" id="panel-buscar">
+      <div class="card">
+        <h2>Buscar produto</h2>
+        <div class="field">
+          <label for="input-produto">Nome do produto</label>
+          <div class="input-row">
+            <input type="text" id="input-produto" placeholder="ex: arroz, sabonete, papel higiênico" />
+            <button class="btn primary" id="btn-buscar-produto">
+              <i class="ti ti-search"></i>
+            </button>
+          </div>
+          <p class="helper">Busca por aproximação no nome do item registrado nas notas.</p>
+        </div>
+        <div id="buscar-result"></div>
+      </div>
+    </section>
+
+    <!-- Aba: Itens recorrentes -->
+    <section class="panel" id="panel-recorrentes">
+      <div class="card">
+        <h2>Itens que você compra com frequência</h2>
+        <div class="field">
+          <label for="select-min">Mínimo de compras para considerar recorrente</label>
+          <select id="select-min">
+            <option value="2" selected>2 ou mais vezes</option>
+            <option value="3">3 ou mais vezes</option>
+            <option value="5">5 ou mais vezes</option>
+          </select>
+        </div>
+        <button class="btn primary full" id="btn-carregar-recorrentes">
+          <i class="ti ti-refresh"></i> Carregar
+        </button>
+        <div id="recorrentes-result" style="margin-top: 1rem;"></div>
+      </div>
+    </section>
+
+    <!-- Aba: Histórico geral de compras -->
+    <section class="panel" id="panel-historico">
+      <div class="card">
+        <h2>Suas notas registradas</h2>
+        <button class="btn full" id="btn-carregar-historico">
+          <i class="ti ti-refresh"></i> Atualizar lista
+        </button>
+        <div id="historico-result" style="margin-top: 1rem;"></div>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    const API_BASE = 'http://localhost:3333';
+
+    // ---------- Navegação entre abas ----------
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const panels = document.querySelectorAll('.panel');
+
+    tabButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        tabButtons.forEach((b) => b.classList.remove('active'));
+        panels.forEach((p) => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // ---------- Helpers ----------
+    function loadingHtml(text) {
+      return `<div class="loading"><div class="spinner"></div>${text}</div>`;
+    }
+
+    function emptyHtml(icon, text) {
+      return `<div class="empty-state"><i class="ti ${icon}" aria-hidden="true"></i><p>${text}</p></div>`;
+    }
+
+    function alertHtml(text) {
+      return `<div class="alert"><i class="ti ti-alert-circle" aria-hidden="true"></i> ${text}</div>`;
+    }
+
+    function formatValor(valor) {
+      if (!valor) return '-';
+      const match = String(valor).match(/[\d.,]+/);
+      if (!match) return valor;
+      return 'R$ ' + match[0].replace('.', ',').replace(/^,/, '0,');
+    }
+
+    function formatData(data) {
+      if (!data) return '-';
+      // recorta para mostrar só data, sem hora
+      return String(data).split(' ')[0];
+    }
+
+    async function apiGet(path, params = {}) {
+      const url = new URL(API_BASE + path, window.location.origin);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      const res = await fetch(url);
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Resposta inválida do servidor (status ${res.status}). Verifique a rota ${url.pathname}.`);
+      }
+      if (!res.ok) throw new Error(data.error || 'Erro na requisição');
+      return data;
+    }
+
+    async function apiPost(path, body) {
+      const res = await fetch(API_BASE + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Resposta inválida do servidor (status ${res.status}). Verifique a rota ${API_BASE + path}.`);
+      }
+      if (!res.ok) throw new Error(data.error || 'Erro na requisição');
+      return data;
+    }
+
+    // ---------- Aba: Ler nota / QR code ----------
+    const inputUrl = document.getElementById('input-url');
+    const btnConsultar = document.getElementById('btn-consultar');
+    const leitorResult = document.getElementById('leitor-result');
+    const btnStartScan = document.getElementById('btn-start-scan');
+    const qrReaderDiv = document.getElementById('qr-reader');
+
+    let html5QrCode;
+
+    btnStartScan.addEventListener('click', async () => {
+      if (qrReaderDiv.style.display === 'none') {
+        qrReaderDiv.style.display = 'block';
+        btnStartScan.innerHTML = '<i class="ti ti-player-stop"></i> Parar câmera';
+
+        html5QrCode = new Html5Qrcode('qr-reader');
+        try {
+          await html5QrCode.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: 220 },
+            (decodedText) => {
+              inputUrl.value = decodedText;
+              stopScanner();
+              consultarNota(decodedText);
+            },
+            () => {}
+          );
+        } catch (err) {
+          leitorResult.innerHTML = alertHtml('Não foi possível acessar a câmera: ' + err.message);
+          stopScanner();
+        }
+      } else {
+        stopScanner();
+      }
+    });
+
+    function stopScanner() {
+      if (html5QrCode) {
+        html5QrCode.stop().catch(() => {});
+      }
+      qrReaderDiv.style.display = 'none';
+      btnStartScan.innerHTML = '<i class="ti ti-player-play"></i> Iniciar câmera';
+    }
+
+    btnConsultar.addEventListener('click', () => {
+      const url = inputUrl.value.trim();
+      if (!url) {
+        leitorResult.innerHTML = alertHtml('Cole o link da nota fiscal ou escaneie o QR code.');
+        return;
+      }
+      consultarNota(url);
+    });
+
+    async function consultarNota(url) {
+      leitorResult.innerHTML = loadingHtml('Consultando nota fiscal...');
+      try {
+        const data = await apiPost('/consulta-qrcode', { url });
+        renderNota(data);
+      } catch (err) {
+        leitorResult.innerHTML = alertHtml(err.message);
+      }
+    }
+
+    function renderNota(data) {
+      const itensHtml = (data.itens || []).map((item) => `
+        <div class="result-row">
+          <div class="info">
+            <p>${item.descricao || 'Item'}</p>
+            <p>Cód: ${item.codigo || '-'} • Qtd: ${item.quantidade || '-'} ${item.unidade || ''}</p>
+          </div>
+          <div class="value">${formatValor(item.valor_total)}</div>
+        </div>
+      `).join('');
+
+      leitorResult.innerHTML = `
+        <div class="card" style="margin-top:1rem; background: var(--bg-secondary); border: none;">
+          <h2>${data.emitente?.nome || 'Estabelecimento'}</h2>
+          <p style="font-size:12px; color: var(--text-secondary); margin: -8px 0 12px;">
+            CNPJ: ${data.emitente?.cnpj || '-'} • ${data.emitente?.uf || ''}
+          </p>
+          <div class="item-list">${itensHtml || emptyHtml('ti-package-off', 'Nenhum item identificado')}</div>
+          <div class="receipt-summary">
+            <div class="row"><span>Data</span><span>${data.nota?.data_emissao || '-'}</span></div>
+            <div class="row"><span>Qtde de itens</span><span>${data.totais?.quantidade_total_itens || '-'}</span></div>
+            <div class="row"><span>Forma de pagamento</span><span>${data.totais?.forma_pagamento || '-'}</span></div>
+            <div class="row total"><span>Valor pago</span><span>${formatValor(data.totais?.valor_pago)}</span></div>
+          </div>
+        </div>
+        <div class="alert" style="background: var(--accent-bg); color: var(--accent-text); margin-top: 12px;">
+          <i class="ti ti-check" aria-hidden="true"></i> Nota registrada com sucesso no seu histórico.
+        </div>
+      `;
+    }
+
+    // ---------- Aba: Buscar produto ----------
+    const inputProduto = document.getElementById('input-produto');
+    const btnBuscarProduto = document.getElementById('btn-buscar-produto');
+    const buscarResult = document.getElementById('buscar-result');
+
+    btnBuscarProduto.addEventListener('click', buscarProduto);
+    inputProduto.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') buscarProduto();
+    });
+
+    async function buscarProduto() {
+      const termo = inputProduto.value.trim();
+      if (!termo) return;
+
+      buscarResult.innerHTML = loadingHtml('Buscando produto...');
+      try {
+        const data = await apiGet('/historico-compras', { produto: termo });
+
+        if (!data.historico || data.historico.length === 0) {
+          buscarResult.innerHTML = emptyHtml('ti-package-off', 'Nenhuma compra encontrada para esse produto.');
+          return;
+        }
+
+        const ultima = data.ultima_compra;
+        const menor = data.menor_preco;
+        const mesmaCompra = ultima.local === menor.local && ultima.valor_total === menor.valor_total;
+
+        const historicoHtml = data.historico.map((h) => `
+          <div class="result-row">
+            <div class="info">
+              <p>${h.local || 'Local desconhecido'}</p>
+              <p>${formatData(h.data_compra)} • ${h.uf || ''}</p>
+            </div>
+            <div class="value">${formatValor(h.valor_total)}</div>
+          </div>
+        `).join('');
+
+        buscarResult.innerHTML = `
+          <div class="summary-grid">
+            <div class="metric">
+              <p class="label"><i class="ti ti-clock" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Última compra</p>
+              <p class="value">${formatValor(ultima.valor_total)}</p>
+              <span class="badge last">${ultima.local}</span>
+            </div>
+            <div class="metric">
+              <p class="label"><i class="ti ti-tag" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Melhor preço</p>
+              <p class="value">${formatValor(menor.valor_total)}</p>
+              <span class="badge best">${mesmaCompra ? 'Mesmo local' : menor.local}</span>
+            </div>
+          </div>
+          <h2 style="font-size:14px; margin-bottom: 8px;">Histórico de preços — ${data.produto}</h2>
+          <div class="item-list">${historicoHtml}</div>
+        `;
+      } catch (err) {
+        buscarResult.innerHTML = alertHtml(err.message);
+      }
+    }
+
+    // ---------- Aba: Itens recorrentes ----------
+    const btnRecorrentes = document.getElementById('btn-carregar-recorrentes');
+    const recorrentesResult = document.getElementById('recorrentes-result');
+    const selectMin = document.getElementById('select-min');
+
+    btnRecorrentes.addEventListener('click', carregarRecorrentes);
+
+    async function carregarRecorrentes() {
+      recorrentesResult.innerHTML = loadingHtml('Analisando seu histórico...');
+      try {
+        const data = await apiGet('/historico-compras', {
+          recorrentes: 'true',
+          min_compras: selectMin.value,
+        });
+
+        if (!data.itens_recorrentes || data.itens_recorrentes.length === 0) {
+          recorrentesResult.innerHTML = emptyHtml('ti-repeat-off', 'Nenhum item recorrente encontrado ainda. Registre mais notas para identificar padrões.');
+          return;
+        }
+
+        const itemsHtml = data.itens_recorrentes.map((item) => {
+          const mesmoLocal = item.ultima_compra.local === item.menor_preco.local;
+          return `
+            <div class="item-card" onclick="document.getElementById('input-produto').value='${(item.descricao || '').replace(/'/g, "")}'; document.querySelector('[data-tab=buscar]').click(); buscarProduto();">
+              <div class="top-row">
+                <p>${item.descricao || 'Item'}</p>
+                <span>${item.vezes_comprado}x comprado</span>
+              </div>
+              <div class="meta">
+                Última vez: ${formatValor(item.ultima_compra.valor_total)} em ${item.ultima_compra.local || '-'} (${formatData(item.ultima_compra.data_compra)})
+              </div>
+              <span class="badge ${mesmoLocal ? 'last' : 'best'}">
+                <i class="ti ti-tag" aria-hidden="true"></i>
+                Melhor preço: ${formatValor(item.menor_preco.valor_total)} ${mesmoLocal ? '' : 'em ' + item.menor_preco.local}
+              </span>
+            </div>
+          `;
+        }).join('');
+
+        recorrentesResult.innerHTML = `
+          <p class="helper" style="margin-bottom: 12px;">${data.total} item(ns) comprados ${data.criterio_minimo_compras}+ vezes. Toque em um item para ver o histórico completo.</p>
+          <div class="item-list">${itemsHtml}</div>
+        `;
+      } catch (err) {
+        recorrentesResult.innerHTML = alertHtml(err.message);
+      }
+    }
+
+    // ---------- Aba: Histórico geral ----------
+    const btnHistorico = document.getElementById('btn-carregar-historico');
+    const historicoResult = document.getElementById('historico-result');
+
+    btnHistorico.addEventListener('click', carregarHistorico);
+
+    function toggleNota(idx) {
+      document.getElementById('nota-' + idx).classList.toggle('expanded');
+    }
+
+    async function carregarHistorico() {
+      historicoResult.innerHTML = loadingHtml('Carregando suas compras...');
+      try {
+        const data = await apiGet('/historico-compras');
+
+        if (!data.compras || data.compras.length === 0) {
+          historicoResult.innerHTML = emptyHtml('ti-receipt-off', 'Nenhuma compra registrada ainda. Escaneie sua primeira nota na aba "Ler nota".');
+          return;
+        }
+
+        const comprasHtml = data.compras.map((c, idx) => {
+          const itensHtml = (c.itens || []).map((item) => `
+            <div class="result-row">
+              <div class="info">
+                <p>${item.descricao || 'Item'}</p>
+                <p>Cód: ${item.codigo || '-'} • Qtd: ${item.quantidade || '-'}</p>
+              </div>
+              <div class="value">${formatValor(item.valor_total)}</div>
+            </div>
+          `).join('');
+
+          return `
+            <div class="item-card" id="nota-${idx}" onclick="toggleNota(${idx})">
+              <div class="top-row">
+                <p>${c.local || 'Estabelecimento'}</p>
+                <span>${formatValor(c.valor_pago)} <i class="ti ti-chevron-down chevron" aria-hidden="true"></i></span>
+              </div>
+              <div class="meta">${formatData(c.data_compra)} • ${c.quantidade_itens || (c.itens || []).length} ite${(c.itens||[]).length === 1 ? 'm' : 'ns'}</div>
+              <div class="nota-itens">${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}</div>
+            </div>
+          `;
+        }).join('');
+
+        historicoResult.innerHTML = `
+          <p class="helper" style="margin-bottom: 12px;">${data.total} nota(s) registrada(s).</p>
+          <div class="item-list">${comprasHtml}</div>
+        `;
+      } catch (err) {
+        historicoResult.innerHTML = alertHtml(err.message);
+      }
+    }
+  </script>
+</body>
 </html>
