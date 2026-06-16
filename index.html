@@ -591,7 +591,7 @@
     </section>
   </div>
 
-  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
   <script>
     const API_BASE = '/api';
 
@@ -680,8 +680,9 @@
     const cameraIcon = document.getElementById('camera-icon');
     const scannerPrompt = document.getElementById('scanner-prompt');
 
-    let codeReader = null;
+    let stream = null;
     let scanning = false;
+    let animFrameId = null;
 
     btnStartScan.addEventListener('click', async () => {
       if (!scanning) {
@@ -700,52 +701,40 @@
       btnStartScan.innerHTML = '<i class="ti ti-player-stop"></i> Parar câmera';
 
       try {
-        codeReader = new ZXing.BrowserQRCodeReader();
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
 
-        // Pega a câmera traseira
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(d => d.kind === 'videoinput');
-        const backCamera = videoDevices.find(d =>
-          /back|rear|environment|traseira/i.test(d.label)
-        ) || videoDevices[videoDevices.length - 1];
-
-        const constraints = {
-          video: {
-            deviceId: backCamera ? { exact: backCamera.deviceId } : undefined,
-            facingMode: backCamera ? undefined : { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          }
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         const videoEl = document.getElementById('qr-video');
         videoEl.srcObject = stream;
-        videoEl.play();
+        await videoEl.play();
 
-        // Leitura contínua com ZXing
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-        const reader = new ZXing.BrowserQRCodeReader(hints);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
 
-        (async function scanLoop() {
+        function tick() {
           if (!scanning) return;
-          try {
-            const result = await reader.decodeOnce(videoEl);
-            if (result && scanning) {
-              const text = result.getText();
-              inputUrl.value = text;
+          if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+            canvas.width = videoEl.videoWidth;
+            canvas.height = videoEl.videoHeight;
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+              inversionAttempts: 'dontInvert',
+            });
+            if (code) {
+              inputUrl.value = code.data;
               scanSuccess.classList.add('show');
               if (navigator.vibrate) navigator.vibrate(100);
               stopScanner();
-              consultarNota(text);
+              consultarNota(code.data);
+              return;
             }
-          } catch (e) {
-            if (scanning) scanLoop();
           }
-        })();
+          animFrameId = requestAnimationFrame(tick);
+        }
 
-        codeReader._stream = stream;
+        animFrameId = requestAnimationFrame(tick);
       } catch (err) {
         leitorResult.innerHTML = alertHtml('Não foi possível acessar a câmera: ' + err.message);
         stopScanner();
@@ -754,12 +743,10 @@
 
     function stopScanner() {
       scanning = false;
-      if (codeReader && codeReader._stream) {
-        codeReader._stream.getTracks().forEach(t => t.stop());
-      }
+      if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
       const videoEl = document.getElementById('qr-video');
-      if (videoEl) { videoEl.srcObject = null; }
-      codeReader = null;
+      if (videoEl) videoEl.srcObject = null;
       scannerWrapper.classList.remove('active');
       cameraIcon.style.display = '';
       scannerPrompt.style.display = '';
