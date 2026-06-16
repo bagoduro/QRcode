@@ -38,6 +38,13 @@ const savePurchase = async (url, resultado) => {
     const db = await getDb();
     console.log('[savePurchase] Conectado ao banco');
     const purchases = db.collection('purchases');
+
+    const existing = await purchases.findOne({ url });
+    if (existing) {
+      console.log('[savePurchase] URL já registrada, ignorando duplicata.');
+      return { duplicate: true };
+    }
+
     const purchase = {
       url,
       createdAt: new Date(),
@@ -50,6 +57,7 @@ const savePurchase = async (url, resultado) => {
 
     const result = await purchases.insertOne(purchase);
     console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
+    return { duplicate: false };
   } catch (error) {
     console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
     throw error;
@@ -158,7 +166,10 @@ app.post('/consulta-qrcode', async (req, res) => {
 
   try {
     const resultado = await fetchAndParseUrl(url);
-    await savePurchase(url, resultado);
+    const saveResult = await savePurchase(url, resultado);
+    if (saveResult?.duplicate) {
+      return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
+    }
     return res.json(resultado);
   } catch (error) {
     console.error('[POST /consulta-qrcode] Erro:', error.message);
@@ -188,7 +199,10 @@ app.get('/consulta-qrcode', async (req, res) => {
 
   try {
     const resultado = await fetchAndParseUrl(url);
-    await savePurchase(url, resultado);
+    const saveResult = await savePurchase(url, resultado);
+    if (saveResult?.duplicate) {
+      return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
+    }
     return res.json(resultado);
   } catch (error) {
     console.error('[GET /consulta-qrcode] Erro:', error.message);

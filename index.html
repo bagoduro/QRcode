@@ -769,7 +769,14 @@
         const data = await apiPost('/consulta-qrcode', { url });
         renderNota(data);
       } catch (err) {
-        leitorResult.innerHTML = alertHtml(err.message);
+        if (err.message && err.message.includes('já registrada')) {
+          leitorResult.innerHTML = `
+            <div class="alert" style="background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent-text);">
+              <i class="ti ti-info-circle" aria-hidden="true"></i> Essa nota já foi registrada anteriormente.
+            </div>`;
+        } else {
+          leitorResult.innerHTML = alertHtml(err.message);
+        }
       }
     }
 
