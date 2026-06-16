@@ -194,11 +194,100 @@
       margin: 0 0 12px;
     }
 
+    /* Esconde elementos padrão da biblioteca html5-qrcode */
+    #qr-reader img, #qr-reader select, #qr-reader button,
+    #qr-reader #qr-reader__dashboard_section_swaplink,
+    #qr-reader__status_span { display: none !important; }
+    #qr-reader video { display: block; width: 100% !important; }
+
     #qr-reader {
       width: 100%;
       border-radius: var(--radius-md);
       overflow: hidden;
     }
+
+    .scanner-wrapper {
+      position: relative;
+      display: none;
+      margin-top: 12px;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .scanner-wrapper.active { display: block; }
+
+    .scanner-overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scanner-box {
+      width: 200px;
+      height: 200px;
+      position: relative;
+    }
+
+    .scanner-box::before,
+    .scanner-box::after,
+    .scanner-box .corner-br,
+    .scanner-box .corner-bl {
+      content: '';
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      border-color: #fff;
+      border-style: solid;
+    }
+
+    .scanner-box::before { top: 0; left: 0; border-width: 3px 0 0 3px; }
+    .scanner-box::after  { top: 0; right: 0; border-width: 3px 3px 0 0; }
+    .scanner-box .corner-br { bottom: 0; right: 0; border-width: 0 3px 3px 0; }
+    .scanner-box .corner-bl { bottom: 0; left: 0; border-width: 0 0 3px 3px; }
+
+    .scan-line {
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #0F6E56, transparent);
+      animation: scanMove 1.8s ease-in-out infinite;
+      top: 0;
+    }
+
+    @keyframes scanMove {
+      0%   { top: 4px; }
+      50%  { top: calc(100% - 6px); }
+      100% { top: 4px; }
+    }
+
+    .scanner-hint {
+      color: rgba(255,255,255,0.85);
+      font-size: 12px;
+      margin-top: 12px;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+      text-align: center;
+    }
+
+    .scan-success {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent-bg);
+      color: var(--accent-text);
+      border-radius: var(--radius-md);
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 8px;
+    }
+
+    .scan-success.show { display: flex; }
 
     .result-row {
       display: flex;
@@ -418,12 +507,25 @@
         <h2>Escanear cupom fiscal</h2>
 
         <div class="scanner-frame">
-          <i class="ti ti-camera" aria-hidden="true"></i>
-          <p>Aponte a câmera para o QR code da nota fiscal</p>
+          <i class="ti ti-camera" aria-hidden="true" id="camera-icon"></i>
+          <p id="scanner-prompt">Aponte a câmera para o QR code da nota fiscal</p>
           <button class="btn primary full" id="btn-start-scan">
             <i class="ti ti-player-play"></i> Iniciar câmera
           </button>
-          <div id="qr-reader" style="display:none; margin-top:12px;"></div>
+          <div class="scanner-wrapper" id="scanner-wrapper">
+            <video id="qr-video" style="width:100%; display:block;" autoplay muted playsinline></video>
+            <div class="scanner-overlay">
+              <div class="scanner-box">
+                <div class="scan-line"></div>
+                <div class="corner-br"></div>
+                <div class="corner-bl"></div>
+              </div>
+              <p class="scanner-hint">Centralize o QR code no quadro</p>
+            </div>
+          </div>
+          <div class="scan-success" id="scan-success">
+            <i class="ti ti-check" aria-hidden="true"></i> QR code lido! Consultando nota...
+          </div>
         </div>
 
         <div class="field">
@@ -489,7 +591,7 @@
     </section>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
   <script>
     const API_BASE = '/api';
 
@@ -571,41 +673,96 @@
     const btnConsultar = document.getElementById('btn-consultar');
     const leitorResult = document.getElementById('leitor-result');
     const btnStartScan = document.getElementById('btn-start-scan');
-    const qrReaderDiv = document.getElementById('qr-reader');
-
     let html5QrCode;
 
-    btnStartScan.addEventListener('click', async () => {
-      if (qrReaderDiv.style.display === 'none') {
-        qrReaderDiv.style.display = 'block';
-        btnStartScan.innerHTML = '<i class="ti ti-player-stop"></i> Parar câmera';
+    const scannerWrapper = document.getElementById('scanner-wrapper');
+    const scanSuccess = document.getElementById('scan-success');
+    const cameraIcon = document.getElementById('camera-icon');
+    const scannerPrompt = document.getElementById('scanner-prompt');
 
-        html5QrCode = new Html5Qrcode('qr-reader');
-        try {
-          await html5QrCode.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: 220 },
-            (decodedText) => {
-              inputUrl.value = decodedText;
-              stopScanner();
-              consultarNota(decodedText);
-            },
-            () => {}
-          );
-        } catch (err) {
-          leitorResult.innerHTML = alertHtml('Não foi possível acessar a câmera: ' + err.message);
-          stopScanner();
-        }
+    let codeReader = null;
+    let scanning = false;
+
+    btnStartScan.addEventListener('click', async () => {
+      if (!scanning) {
+        startScanner();
       } else {
         stopScanner();
       }
     });
 
-    function stopScanner() {
-      if (html5QrCode) {
-        html5QrCode.stop().catch(() => {});
+    async function startScanner() {
+      scanning = true;
+      scannerWrapper.classList.add('active');
+      cameraIcon.style.display = 'none';
+      scannerPrompt.style.display = 'none';
+      scanSuccess.classList.remove('show');
+      btnStartScan.innerHTML = '<i class="ti ti-player-stop"></i> Parar câmera';
+
+      try {
+        codeReader = new ZXing.BrowserQRCodeReader();
+
+        // Pega a câmera traseira
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(d => d.kind === 'videoinput');
+        const backCamera = videoDevices.find(d =>
+          /back|rear|environment|traseira/i.test(d.label)
+        ) || videoDevices[videoDevices.length - 1];
+
+        const constraints = {
+          video: {
+            deviceId: backCamera ? { exact: backCamera.deviceId } : undefined,
+            facingMode: backCamera ? undefined : { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          }
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const videoEl = document.getElementById('qr-video');
+        videoEl.srcObject = stream;
+        videoEl.play();
+
+        // Leitura contínua com ZXing
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        const reader = new ZXing.BrowserQRCodeReader(hints);
+
+        (async function scanLoop() {
+          if (!scanning) return;
+          try {
+            const result = await reader.decodeOnce(videoEl);
+            if (result && scanning) {
+              const text = result.getText();
+              inputUrl.value = text;
+              scanSuccess.classList.add('show');
+              if (navigator.vibrate) navigator.vibrate(100);
+              stopScanner();
+              consultarNota(text);
+            }
+          } catch (e) {
+            if (scanning) scanLoop();
+          }
+        })();
+
+        codeReader._stream = stream;
+      } catch (err) {
+        leitorResult.innerHTML = alertHtml('Não foi possível acessar a câmera: ' + err.message);
+        stopScanner();
       }
-      qrReaderDiv.style.display = 'none';
+    }
+
+    function stopScanner() {
+      scanning = false;
+      if (codeReader && codeReader._stream) {
+        codeReader._stream.getTracks().forEach(t => t.stop());
+      }
+      const videoEl = document.getElementById('qr-video');
+      if (videoEl) { videoEl.srcObject = null; }
+      codeReader = null;
+      scannerWrapper.classList.remove('active');
+      cameraIcon.style.display = '';
+      scannerPrompt.style.display = '';
       btnStartScan.innerHTML = '<i class="ti ti-player-play"></i> Iniciar câmera';
     }
 
