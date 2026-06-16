@@ -722,12 +722,13 @@
             const code = jsQR(imageData.data, imageData.width, imageData.height, {
               inversionAttempts: 'dontInvert',
             });
-            if (code) {
-              inputUrl.value = code.data;
+            if (code && code.data) {
+              const url = code.data;
+              inputUrl.value = url;
               scanSuccess.classList.add('show');
               if (navigator.vibrate) navigator.vibrate(100);
               stopScanner();
-              consultarNota(code.data);
+              consultarNota(url);
               return;
             }
           }
