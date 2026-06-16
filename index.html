@@ -506,9 +506,75 @@
       nav.tabs button span { display: none; }
       .summary-grid { grid-template-columns: 1fr 1fr; }
     }
+
+    /* Modal de confirmação */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-box {
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      max-width: 320px;
+      width: calc(100% - 2rem);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    .modal-box h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 8px;
+    }
+    .modal-box p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 1.25rem;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .modal-actions button {
+      border-radius: var(--radius-md);
+      height: 36px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 0.5px solid var(--border-strong);
+    }
+    .modal-btn-cancel {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+    .modal-btn-cancel:hover { background: var(--bg-secondary); }
+    .modal-btn-confirm {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger) !important;
+    }
+    .modal-btn-confirm:hover { opacity: 0.88; }
   </style>
 </head>
 <body>
+  <div class="modal-overlay" id="modal-excluir">
+    <div class="modal-box">
+      <h3>Excluir nota</h3>
+      <p>Tem certeza que deseja excluir esta nota? Essa ação não pode ser desfeita.</p>
+      <div class="modal-actions">
+        <button class="modal-btn-cancel" id="modal-cancelar">Cancelar</button>
+        <button class="modal-btn-confirm" id="modal-confirmar">Excluir</button>
+      </div>
+    </div>
+  </div>
   <div class="app">
     <header>
       <h1>Histórico de compras</h1>
@@ -965,32 +1031,51 @@
       document.getElementById('nota-' + idx).classList.toggle('expanded');
     }
 
-    async function excluirNota(urlEncoded, idx) {
+    function excluirNota(urlEncoded, idx) {
       const url = decodeURIComponent(urlEncoded);
-      if (!url) {
-        alert('Não foi possível identificar a nota para excluir.');
-        return;
-      }
-      const confirmado = confirm('Tem certeza que deseja excluir esta nota? Essa ação não pode ser desfeita.');
-      if (!confirmado) return;
+      if (!url) return;
 
-      try {
-        await apiDelete('/historico-compras', { url });
-        const card = document.getElementById('nota-' + idx);
-        if (card) {
-          card.style.transition = 'opacity 0.3s';
-          card.style.opacity = '0';
-          setTimeout(() => { card.remove(); }, 300);
-        }
-        // Atualiza o contador
-        const helper = historicoResult.querySelector('.helper');
-        if (helper) {
-          const remaining = historicoResult.querySelectorAll('.item-card').length - 1;
-          helper.textContent = remaining + ' nota(s) registrada(s).';
-        }
-      } catch (err) {
-        alert('Erro ao excluir nota: ' + err.message);
+      const overlay = document.getElementById('modal-excluir');
+      const btnConfirmar = document.getElementById('modal-confirmar');
+      const btnCancelar = document.getElementById('modal-cancelar');
+
+      overlay.classList.add('active');
+
+      function fechar() {
+        overlay.classList.remove('active');
+        btnConfirmar.removeEventListener('click', onConfirm);
+        btnCancelar.removeEventListener('click', fechar);
+        overlay.removeEventListener('click', onOverlay);
       }
+
+      async function onConfirm() {
+        fechar();
+        try {
+          await apiDelete('/historico-compras', { url });
+          const card = document.getElementById('nota-' + idx);
+          if (card) {
+            card.style.transition = 'opacity 0.3s';
+            card.style.opacity = '0';
+            setTimeout(() => { card.remove(); }, 300);
+          }
+          const helper = historicoResult.querySelector('.helper');
+          if (helper) {
+            const remaining = historicoResult.querySelectorAll('.item-card').length - 1;
+            helper.textContent = remaining + ' nota(s) registrada(s).';
+          }
+        } catch (err) {
+          // mostra erro inline no topo do resultado
+          const errDiv = document.createElement('div');
+          errDiv.innerHTML = alertHtml(err.message);
+          historicoResult.prepend(errDiv);
+        }
+      }
+
+      function onOverlay(e) { if (e.target === overlay) fechar(); }
+
+      btnConfirmar.addEventListener('click', onConfirm);
+      btnCancelar.addEventListener('click', fechar);
+      overlay.addEventListener('click', onOverlay);
     }
 
     async function carregarHistorico() {
