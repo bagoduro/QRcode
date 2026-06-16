@@ -433,6 +433,27 @@
     .nota-itens .result-row .info p:first-child { font-size: 13px; }
     .nota-itens .result-row .value { font-size: 13px; font-weight: 400; }
 
+    .btn-excluir-nota {
+      margin-top: 12px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 0.5px solid var(--danger);
+      background: transparent;
+      color: var(--danger);
+      border-radius: var(--radius-md);
+      height: 36px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-excluir-nota:hover { background: var(--danger-bg); }
+    .btn-excluir-nota:active { transform: scale(0.98); }
+
     .loading {
       display: flex;
       align-items: center;
@@ -648,6 +669,23 @@
         throw new Error(`Resposta inválida do servidor (status ${res.status}). Verifique a rota ${url.pathname}.`);
       }
       if (!res.ok) throw new Error(data.error || 'Erro na requisição');
+      return data;
+    }
+
+    async function apiDelete(path, params = {}) {
+      const url = new URL(API_BASE + path, window.location.origin);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      const res = await fetch(url, { method: 'DELETE' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Resposta inválida do servidor (status ${res.status}).`);
+      }
+      if (!res.ok) throw new Error(data.error || 'Erro ao excluir');
       return data;
     }
 
@@ -927,6 +965,34 @@
       document.getElementById('nota-' + idx).classList.toggle('expanded');
     }
 
+    async function excluirNota(urlEncoded, idx) {
+      const url = decodeURIComponent(urlEncoded);
+      if (!url) {
+        alert('Não foi possível identificar a nota para excluir.');
+        return;
+      }
+      const confirmado = confirm('Tem certeza que deseja excluir esta nota? Essa ação não pode ser desfeita.');
+      if (!confirmado) return;
+
+      try {
+        await apiDelete('/historico-compras', { url });
+        const card = document.getElementById('nota-' + idx);
+        if (card) {
+          card.style.transition = 'opacity 0.3s';
+          card.style.opacity = '0';
+          setTimeout(() => { card.remove(); }, 300);
+        }
+        // Atualiza o contador
+        const helper = historicoResult.querySelector('.helper');
+        if (helper) {
+          const remaining = historicoResult.querySelectorAll('.item-card').length - 1;
+          helper.textContent = remaining + ' nota(s) registrada(s).';
+        }
+      } catch (err) {
+        alert('Erro ao excluir nota: ' + err.message);
+      }
+    }
+
     async function carregarHistorico() {
       historicoResult.innerHTML = loadingHtml('Carregando suas compras...');
       try {
@@ -948,6 +1014,7 @@
             </div>
           `).join('');
 
+          const urlEncoded = encodeURIComponent(c.url || '');
           return `
             <div class="item-card" id="nota-${idx}" onclick="toggleNota(${idx})">
               <div class="top-row">
@@ -955,7 +1022,12 @@
                 <span>${formatValor(c.valor_pago)} <i class="ti ti-chevron-down chevron" aria-hidden="true"></i></span>
               </div>
               <div class="meta">${formatData(c.data_compra)} • ${c.quantidade_itens || (c.itens || []).length} ite${(c.itens||[]).length === 1 ? 'm' : 'ns'}</div>
-              <div class="nota-itens">${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}</div>
+              <div class="nota-itens">
+                ${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}
+                <button class="btn-excluir-nota" onclick="event.stopPropagation(); excluirNota('${urlEncoded}', ${idx})">
+                  <i class="ti ti-trash" aria-hidden="true"></i> Excluir esta nota
+                </button>
+              </div>
             </div>
           `;
         }).join('');

@@ -3,15 +3,35 @@ import { getDb } from '../db.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Método não permitido. Use GET.' });
+  if (req.method !== 'GET' && req.method !== 'DELETE') {
+    return res.status(405).json({ error: 'Método não permitido. Use GET ou DELETE.' });
+  }
+
+  // DELETE: excluir nota pelo campo url
+  if (req.method === 'DELETE') {
+    const { url } = req.query;
+    if (!url) {
+      return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
+    }
+    try {
+      const db = await getDb();
+      const purchases = db.collection('purchases');
+      const result = await purchases.deleteOne({ url });
+      if (result.deletedCount === 0) {
+        return res.status(404).json({ error: 'Nota não encontrada.' });
+      }
+      return res.json({ success: true, message: 'Nota excluída com sucesso.' });
+    } catch (err) {
+      console.error('[DELETE /api/historico-compras] Erro:', err.message, err.stack);
+      return res.status(500).json({ error: 'Erro interno', details: err.message });
+    }
   }
 
   const { produto, codigo, recorrentes, min_compras } = req.query;

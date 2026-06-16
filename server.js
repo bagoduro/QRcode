@@ -399,6 +399,30 @@ app.get('/historico-compras', async (req, res) => {
   }
 });
 
+app.delete('/historico-compras', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
+  }
+
+  try {
+    const db = await getDb();
+    const purchases = db.collection('purchases');
+
+    const result = await purchases.deleteOne({ url });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Nota não encontrada.' });
+    }
+
+    return res.json({ success: true, message: 'Nota excluída com sucesso.' });
+  } catch (err) {
+    console.error('[DELETE /historico-compras] Erro:', err.message, err.stack);
+    return res.status(500).json({ error: 'Erro interno', details: err.message });
+  }
+});
+
 app.listen(port, () => {
   console.log(`Backend NFC-e rodando em http://localhost:${port}`);
   console.log('[Startup] Variáveis de ambiente:');
