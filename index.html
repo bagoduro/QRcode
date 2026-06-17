@@ -562,6 +562,78 @@
       border-color: var(--danger) !important;
     }
     .modal-btn-confirm:hover { opacity: 0.88; }
+
+    .comparacao-section { margin-top: 1.5rem; }
+    .comparacao-section h2 { font-size: 14px; margin-bottom: 10px; }
+
+    .loja-card {
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      position: relative;
+    }
+
+    .loja-card.melhor {
+      border-color: var(--accent);
+    }
+
+    .loja-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .loja-card-nome {
+      font-size: 13px;
+      font-weight: 500;
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .loja-card-valores {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .loja-card-valores span strong {
+      color: var(--text-primary);
+      font-weight: 500;
+      font-size: 13px;
+    }
+
+    .loja-rank {
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: var(--radius-md);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .loja-rank.primeiro {
+      background: var(--accent-bg);
+      color: var(--accent-text);
+    }
+
+    .loja-rank.outros {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+    }
+
+    .loja-vezes {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -931,7 +1003,11 @@
 
       buscarResult.innerHTML = loadingHtml('Buscando produto...');
       try {
-        const data = await apiGet('/historico-compras', { produto: termo });
+        // Busca histórico e comparação em paralelo
+        const [data, dataComp] = await Promise.all([
+          apiGet('/historico-compras', { produto: termo }),
+          apiGet('/historico-compras', { produto: termo, comparar: 'true' }),
+        ]);
 
         if (!data.historico || data.historico.length === 0) {
           buscarResult.innerHTML = emptyHtml('ti-package-off', 'Nenhuma compra encontrada para esse produto.');
@@ -952,6 +1028,9 @@
           </div>
         `).join('');
 
+        // Seção de comparação entre lojas
+        const comparacaoHtml = renderComparacao(dataComp);
+
         buscarResult.innerHTML = `
           <div class="summary-grid">
             <div class="metric">
@@ -965,12 +1044,44 @@
               <span class="badge best">${mesmaCompra ? 'Mesmo local' : menor.local}</span>
             </div>
           </div>
-          <h2 style="font-size:14px; margin-bottom: 8px;">Histórico de preços — ${data.produto}</h2>
+          ${comparacaoHtml}
+          <h2 style="font-size:14px; margin-bottom: 8px; margin-top: 1.5rem;">Histórico de preços — ${data.produto}</h2>
           <div class="item-list">${historicoHtml}</div>
         `;
       } catch (err) {
         buscarResult.innerHTML = alertHtml(err.message);
       }
+    }
+
+    function renderComparacao(data) {
+      if (!data || !data.lojas || data.lojas.length < 2) return '';
+
+      const lojasHtml = data.lojas.map((loja, idx) => {
+        const isPrimeiro = idx === 0;
+        const rankLabel = isPrimeiro
+          ? '<i class="ti ti-trophy" aria-hidden="true"></i> Mais barato'
+          : `${idx + 1}º lugar`;
+        return `
+          <div class="loja-card ${isPrimeiro ? 'melhor' : ''}">
+            <div class="loja-card-header">
+              <p class="loja-card-nome">${loja.local || 'Estabelecimento'}</p>
+              <span class="loja-rank ${isPrimeiro ? 'primeiro' : 'outros'}">${rankLabel}</span>
+            </div>
+            <div class="loja-card-valores">
+              <span><strong>${formatValor(loja.menor_valor)}</strong> menor preço</span>
+              <span><strong>${formatValor(loja.ultimo_valor)}</strong> último</span>
+            </div>
+            <p class="loja-vezes">${loja.vezes_comprado} compra${loja.vezes_comprado !== 1 ? 's' : ''} registrada${loja.vezes_comprado !== 1 ? 's' : ''} • ${loja.uf || ''}</p>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <div class="comparacao-section">
+          <h2><i class="ti ti-building-store" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Comparação entre lojas</h2>
+          ${lojasHtml}
+        </div>
+      `;
     }
 
     // ---------- Aba: Itens recorrentes ----------

@@ -4,6 +4,45 @@ import { getDb } from '../db.js';
 
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
 
+// Normaliza nome de produto: remove acentos, lowercase, colapsa espaços
+const normalizeProductName = (text = '') => {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+// Salva/atualiza produto na coleção products e retorna o productId
+const upsertProduct = async (db, item) => {
+  const products = db.collection('products');
+  const nomeNormalizado = normalizeProductName(item.descricao);
+  const filter = item.codigo
+    ? { codigo: item.codigo }
+    : { nome_normalizado: nomeNormalizado };
+
+  const update = {
+    $setOnInsert: {
+      createdAt: new Date(),
+      codigo: item.codigo || null,
+      nome_original: item.descricao,
+      nome_normalizado: nomeNormalizado,
+    },
+    $set: {
+      updatedAt: new Date(),
+    },
+  };
+
+  const result = await products.findOneAndUpdate(filter, update, {
+    upsert: true,
+    returnDocument: 'after',
+  });
+
+  return result._id;
+};
+
+
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
@@ -17,6 +56,17 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
+    const itensEnriquecidos = await Promise.all(
+      resultado.itens.map(async (item) => {
+        const productId = await upsertProduct(db, item);
+        return {
+          ...item,
+          descricao_normalizada: normalizeProductName(item.descricao),
+          product_id: productId,
+        };
+      })
+    );
+
     const purchase = {
       url,
       createdAt: new Date(),
@@ -24,7 +74,7 @@ const savePurchase = async (url, resultado) => {
       nota: resultado.nota,
       chave_acesso: resultado.chave_acesso,
       totais: resultado.totais,
-      itens: resultado.itens,
+      itens: itensEnriquecidos,
     };
 
     const result = await purchases.insertOne(purchase);

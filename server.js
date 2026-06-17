@@ -15,6 +15,45 @@ app.use((req, res, next) => {
 
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
 
+// Normaliza nome de produto: remove acentos, lowercase, colapsa espaços
+const normalizeProductName = (text = '') => {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+// Salva/atualiza produto na coleção products e retorna o productId
+const upsertProduct = async (db, item) => {
+  const products = db.collection('products');
+  const nomeNormalizado = normalizeProductName(item.descricao);
+  const filter = item.codigo
+    ? { codigo: item.codigo }
+    : { nome_normalizado: nomeNormalizado };
+
+  const update = {
+    $setOnInsert: {
+      createdAt: new Date(),
+      codigo: item.codigo || null,
+      nome_original: item.descricao,
+      nome_normalizado: nomeNormalizado,
+    },
+    $set: {
+      updatedAt: new Date(),
+    },
+  };
+
+  const result = await products.findOneAndUpdate(filter, update, {
+    upsert: true,
+    returnDocument: 'after',
+  });
+
+  return result._id;
+};
+
+
 const parseItemRow = (row, $) => {
   const cols = $(row)
     .find('td')
@@ -45,6 +84,18 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
+    // Upsert cada item no catálogo de produtos e enriquecer com product_id + nome_normalizado
+    const itensEnriquecidos = await Promise.all(
+      resultado.itens.map(async (item) => {
+        const productId = await upsertProduct(db, item);
+        return {
+          ...item,
+          descricao_normalizada: normalizeProductName(item.descricao),
+          product_id: productId,
+        };
+      })
+    );
+
     const purchase = {
       url,
       createdAt: new Date(),
@@ -52,7 +103,7 @@ const savePurchase = async (url, resultado) => {
       nota: resultado.nota,
       chave_acesso: resultado.chave_acesso,
       totais: resultado.totais,
-      itens: resultado.itens,
+      itens: itensEnriquecidos,
     };
 
     const result = await purchases.insertOne(purchase);
@@ -231,11 +282,95 @@ const parseValor = (valor) => {
 };
 
 app.get('/historico-compras', async (req, res) => {
-  const { produto, codigo, recorrentes, min_compras } = req.query;
+  const { produto, codigo, recorrentes, min_compras, comparar } = req.query;
 
   try {
     const db = await getDb();
     const purchases = db.collection('purchases');
+
+  // Caso especial: comparar preços de um produto entre estabelecimentos
+  const { comparar } = req.query;
+  if (comparar && (produto || codigo)) {
+    const matchStage = {};
+    if (codigo) {
+      matchStage['itens.codigo'] = codigo;
+    } else {
+      matchStage['itens.descricao_normalizada'] = {
+        $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+        $options: 'i',
+      };
+    }
+
+    const pipeline = [
+      { $match: matchStage },
+      { $unwind: '$itens' },
+      ...(codigo
+        ? [{ $match: { 'itens.codigo': codigo } }]
+        : [{
+            $match: {
+              'itens.descricao_normalizada': {
+                $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+                $options: 'i',
+              },
+            },
+          }]),
+      {
+        $group: {
+          _id: '$emitente.cnpj',
+          local: { $first: '$emitente.nome' },
+          cnpj: { $first: '$emitente.cnpj' },
+          uf: { $first: '$emitente.uf' },
+          vezes_comprado: { $sum: 1 },
+          menor_valor: { $min: { $toDouble: { $ifNull: ['$itens._valor_num', 0] } } },
+          ultimo_valor: { $last: '$itens.valor_total' },
+          ultima_data: { $max: '$createdAt' },
+          ocorrencias: {
+            $push: {
+              data_compra: '$nota.data_emissao',
+              createdAt: '$createdAt',
+              valor_total: '$itens.valor_total',
+              quantidade: '$itens.quantidade',
+            },
+          },
+        },
+      },
+      { $sort: { vezes_comprado: -1, ultima_data: -1 } },
+    ];
+
+    const lojas = await purchases.aggregate(pipeline).toArray();
+
+    // Calcular menor preço real em JS (parseValor é mais confiável que $toDouble)
+    const lojasEnriquecidas = lojas.map((loja) => {
+      const ocorrencias = [...loja.ocorrencias].sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      );
+      const menorOcorrencia = loja.ocorrencias.reduce((menor, atual) => {
+        return parseValor(atual.valor_total) < parseValor(menor.valor_total) ? atual : menor;
+      }, loja.ocorrencias[0]);
+
+      return {
+        local: loja.local,
+        cnpj: loja.cnpj,
+        uf: loja.uf,
+        vezes_comprado: loja.vezes_comprado,
+        ultimo_valor: ocorrencias[0]?.valor_total,
+        ultima_data: ocorrencias[0]?.data_compra,
+        menor_valor: menorOcorrencia?.valor_total,
+        ocorrencias,
+      };
+    });
+
+    // Ordenar por menor preço encontrado
+    const lojasOrdenadas = [...lojasEnriquecidas].sort(
+      (a, b) => parseValor(a.menor_valor) - parseValor(b.menor_valor)
+    );
+
+    return res.json({
+      produto: produto || codigo,
+      total_lojas: lojasOrdenadas.length,
+      lojas: lojasOrdenadas,
+    });
+  }
 
     // Caso 1: buscar histórico de um produto específico (por nome ou código)
     if (produto || codigo) {
@@ -244,7 +379,10 @@ app.get('/historico-compras', async (req, res) => {
       if (codigo) {
         matchStage['itens.codigo'] = codigo;
       } else if (produto) {
-        matchStage['itens.descricao'] = { $regex: produto, $options: 'i' };
+        matchStage['$or'] = [
+          { 'itens.descricao_normalizada': { $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(), $options: 'i' } },
+          { 'itens.descricao': { $regex: produto, $options: 'i' } },
+        ];
       }
 
       const pipeline = [
