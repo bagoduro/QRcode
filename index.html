@@ -1065,6 +1065,11 @@
     const buscarResult = document.getElementById('buscar-result');
 
     btnBuscarProduto.addEventListener('click', buscarProduto);
+
+    buscarResult.addEventListener('click', (e) => {
+      const item = e.target.closest('.sugestao-item');
+      if (item) buscarProduto(item.dataset.descricao);
+    });
     inputProduto.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') buscarProduto();
     });
@@ -1097,7 +1102,7 @@
 
         // Mostra lista de sugestões para o usuário escolher
         const sugestoesHtml = data.sugestoes.map((s) => `
-          <div class="sugestao-item" onclick="buscarProduto(${JSON.stringify(s.descricao)})">
+          <div class="sugestao-item" data-descricao="${s.descricao.replace(/"/g, '&quot;')}">
             <div>
               <p class="sug-nome">${s.descricao}</p>
               <p class="sug-meta">${s.vezes} compra${s.vezes !== 1 ? 's' : ''} registrada${s.vezes !== 1 ? 's' : ''}</p>
