@@ -307,6 +307,67 @@ app.get('/historico-compras', async (req, res) => {
     const db = await getDb();
     const purchases = db.collection('purchases');
 
+  // Sugestões: retorna lista de produtos distintos que batem com o termo
+  const { sugestoes } = req.query;
+  if (sugestoes === 'true' && produto) {
+    const termoNorm = produto
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+    const pipeline = [
+      {
+        $match: {
+          $or: [
+            { 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } },
+            { 'itens.descricao': { $regex: produto, $options: 'i' } },
+          ],
+        },
+      },
+      { $unwind: '$itens' },
+      {
+        $match: {
+          $or: [
+            { 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } },
+            { 'itens.descricao': { $regex: produto, $options: 'i' } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: { $ifNull: ['$itens.descricao_normalizada', { $toLower: '$itens.descricao' }] },
+          descricao_original: { $first: '$itens.descricao' },
+          codigo: { $first: '$itens.codigo' },
+          vezes: { $sum: 1 },
+          menor_preco_unitario: {
+            $min: { $ifNull: ['$itens.preco_unitario', null] },
+          },
+          ultimo_valor: { $last: '$itens.valor_total' },
+          ultimo_local: { $last: '$emitente.nome' },
+        },
+      },
+      { $sort: { vezes: -1 } },
+      { $limit: 10 },
+    ];
+
+    const sugestoesList = await purchases.aggregate(pipeline).toArray();
+
+    return res.json({
+      termo: produto,
+      total: sugestoesList.length,
+      sugestoes: sugestoesList.map((s) => ({
+        descricao: s.descricao_original,
+        descricao_normalizada: s._id,
+        codigo: s.codigo,
+        vezes: s.vezes,
+        menor_preco_unitario: s.menor_preco_unitario,
+        ultimo_valor: s.ultimo_valor,
+        ultimo_local: s.ultimo_local,
+      })),
+    });
+  }
+
   // Caso especial: comparar preços de um produto entre estabelecimentos
   const { comparar } = req.query;
   if (comparar && (produto || codigo)) {

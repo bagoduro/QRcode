@@ -634,6 +634,72 @@
       color: var(--text-tertiary);
       margin-top: 4px;
     }
+
+    .sugestao-lista {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .sugestao-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      gap: 8px;
+    }
+
+    .sugestao-item:hover {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+
+    .sugestao-item .sug-nome {
+      font-size: 13px;
+      font-weight: 500;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sugestao-item .sug-meta {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .sugestao-item .sug-preco {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent-text);
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    .sugestao-titulo {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 8px;
+    }
+
+    .btn-voltar-busca {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      margin-bottom: 12px;
+    }
+
+    .btn-voltar-busca:hover { color: var(--text-primary); }
   </style>
 </head>
 <body>
@@ -1003,20 +1069,66 @@
       if (e.key === 'Enter') buscarProduto();
     });
 
-    async function buscarProduto() {
-      const termo = inputProduto.value.trim();
+    async function buscarProduto(termoExato) {
+      const termo = termoExato || inputProduto.value.trim();
       if (!termo) return;
 
-      buscarResult.innerHTML = loadingHtml('Buscando produto...');
+      // Se for busca exata (usuário escolheu uma sugestão), vai direto ao histórico
+      if (termoExato) {
+        await mostrarHistoricoProduto(termoExato);
+        return;
+      }
+
+      // Busca sugestões primeiro
+      buscarResult.innerHTML = loadingHtml('Buscando...');
       try {
-        // Busca histórico e comparação em paralelo
+        const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
+
+        if (!data.sugestoes || data.sugestoes.length === 0) {
+          buscarResult.innerHTML = emptyHtml('ti-package-off', 'Nenhuma compra encontrada para esse produto.');
+          return;
+        }
+
+        // Se só tem 1 produto, vai direto
+        if (data.sugestoes.length === 1) {
+          await mostrarHistoricoProduto(data.sugestoes[0].descricao);
+          return;
+        }
+
+        // Mostra lista de sugestões para o usuário escolher
+        const sugestoesHtml = data.sugestoes.map((s) => `
+          <div class="sugestao-item" onclick="buscarProduto(${JSON.stringify(s.descricao)})">
+            <div>
+              <p class="sug-nome">${s.descricao}</p>
+              <p class="sug-meta">${s.vezes} compra${s.vezes !== 1 ? 's' : ''} registrada${s.vezes !== 1 ? 's' : ''}</p>
+            </div>
+            <div class="sug-preco">
+              ${s.menor_preco_unitario
+                ? formatPrecoUnitario(s.menor_preco_unitario)
+                : formatValor(s.ultimo_valor)}
+            </div>
+          </div>
+        `).join('');
+
+        buscarResult.innerHTML = `
+          <p class="sugestao-titulo">Encontrei <strong>${data.total}</strong> produto${data.total !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
+          <div class="sugestao-lista">${sugestoesHtml}</div>
+        `;
+      } catch (err) {
+        buscarResult.innerHTML = alertHtml(err.message);
+      }
+    }
+
+    async function mostrarHistoricoProduto(termoProduto) {
+      buscarResult.innerHTML = loadingHtml('Carregando histórico...');
+      try {
         const [data, dataComp] = await Promise.all([
-          apiGet('/historico-compras', { produto: termo }),
-          apiGet('/historico-compras', { produto: termo, comparar: 'true' }),
+          apiGet('/historico-compras', { produto: termoProduto }),
+          apiGet('/historico-compras', { produto: termoProduto, comparar: 'true' }),
         ]);
 
         if (!data.historico || data.historico.length === 0) {
-          buscarResult.innerHTML = emptyHtml('ti-package-off', 'Nenhuma compra encontrada para esse produto.');
+          buscarResult.innerHTML = emptyHtml('ti-package-off', 'Nenhuma compra encontrada.');
           return;
         }
 
@@ -1038,10 +1150,12 @@
           </div>
         `).join('');
 
-        // Seção de comparação entre lojas
         const comparacaoHtml = renderComparacao(dataComp);
 
         buscarResult.innerHTML = `
+          <button class="btn-voltar-busca" onclick="buscarProduto()">
+            <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
+          </button>
           <div class="summary-grid">
             <div class="metric">
               <p class="label"><i class="ti ti-clock" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Última compra</p>
@@ -1119,7 +1233,7 @@
         const itemsHtml = data.itens_recorrentes.map((item) => {
           const mesmoLocal = item.ultima_compra.local === item.menor_preco.local;
           return `
-            <div class="item-card" onclick="document.getElementById('input-produto').value='${(item.descricao || '').replace(/'/g, "")}'; document.querySelector('[data-tab=buscar]').click(); buscarProduto();">
+            <div class="item-card" onclick="document.getElementById('input-produto').value='${(item.descricao || '').replace(/'/g, "")}'; document.querySelector('[data-tab=buscar]').click(); buscarProduto(${JSON.stringify(item.descricao || '')});">
               <div class="top-row">
                 <p>${item.descricao || 'Item'}</p>
                 <span>${item.vezes_comprado}x comprado</span>
