@@ -780,6 +780,12 @@
       return `<div class="alert"><i class="ti ti-alert-circle" aria-hidden="true"></i> ${text}</div>`;
     }
 
+
+    function formatPrecoUnitario(preco_unitario, unidade) {
+      if (!preco_unitario && preco_unitario !== 0) return null;
+      const u = unidade ? '/' + unidade.toLowerCase() : '/un';
+      return formatValor(preco_unitario) + u;
+    }
     function formatValor(valor) {
       if (!valor) return '-';
       const match = String(valor).match(/[\d.,]+/);
@@ -1016,15 +1022,19 @@
 
         const ultima = data.ultima_compra;
         const menor = data.menor_preco;
-        const mesmaCompra = ultima.local === menor.local && ultima.valor_total === menor.valor_total;
+        const mesmaCompra = ultima.local === menor.local &&
+          (ultima.preco_unitario ?? ultima.valor_total) === (menor.preco_unitario ?? menor.valor_total);
 
         const historicoHtml = data.historico.map((h) => `
           <div class="result-row">
             <div class="info">
               <p>${h.local || 'Local desconhecido'}</p>
-              <p>${formatData(h.data_compra)} • ${h.uf || ''}</p>
+              <p>${formatData(h.data_compra)} • qtd: ${h.quantidade || '?'} • ${h.uf || ''}</p>
             </div>
-            <div class="value">${formatValor(h.valor_total)}</div>
+            <div class="value" style="text-align:right;">
+              <span>${formatValor(h.valor_total)}</span>
+              ${h.preco_unitario ? `<br><span style="font-size:11px;color:var(--text-secondary);">${formatPrecoUnitario(h.preco_unitario, h.unidade)}</span>` : ''}
+            </div>
           </div>
         `).join('');
 
@@ -1036,11 +1046,13 @@
             <div class="metric">
               <p class="label"><i class="ti ti-clock" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Última compra</p>
               <p class="value">${formatValor(ultima.valor_total)}</p>
+              ${ultima.preco_unitario ? `<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">${formatPrecoUnitario(ultima.preco_unitario, ultima.unidade)}</p>` : ''}
               <span class="badge last">${ultima.local}</span>
             </div>
             <div class="metric">
-              <p class="label"><i class="ti ti-tag" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Melhor preço</p>
+              <p class="label"><i class="ti ti-tag" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Melhor preço/un</p>
               <p class="value">${formatValor(menor.valor_total)}</p>
+              ${menor.preco_unitario ? `<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">${formatPrecoUnitario(menor.preco_unitario, menor.unidade)}</p>` : ''}
               <span class="badge best">${mesmaCompra ? 'Mesmo local' : menor.local}</span>
             </div>
           </div>
@@ -1068,7 +1080,7 @@
               <span class="loja-rank ${isPrimeiro ? 'primeiro' : 'outros'}">${rankLabel}</span>
             </div>
             <div class="loja-card-valores">
-              <span><strong>${formatValor(loja.menor_valor)}</strong> menor preço</span>
+              <span><strong>${formatValor(loja.menor_valor)}</strong> menor ${loja.menor_preco_unitario ? `<span style="color:var(--accent-text);font-weight:500;">(${formatPrecoUnitario(loja.menor_preco_unitario, loja.unidade)})</span>` : ''}</span>
               <span><strong>${formatValor(loja.ultimo_valor)}</strong> último</span>
             </div>
             <p class="loja-vezes">${loja.vezes_comprado} compra${loja.vezes_comprado !== 1 ? 's' : ''} registrada${loja.vezes_comprado !== 1 ? 's' : ''} • ${loja.uf || ''}</p>

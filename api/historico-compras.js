@@ -97,7 +97,9 @@ export default async function handler(req, res) {
         (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
       );
       const menorOcorrencia = loja.ocorrencias.reduce((menor, atual) => {
-        return parseValor(atual.valor_total) < parseValor(menor.valor_total) ? atual : menor;
+        const vAtual = atual.preco_unitario ?? parseValor(atual.valor_total);
+        const vMenor = menor.preco_unitario ?? parseValor(menor.valor_total);
+        return vAtual < vMenor ? atual : menor;
       }, loja.ocorrencias[0]);
 
       return {
@@ -106,8 +108,11 @@ export default async function handler(req, res) {
         uf: loja.uf,
         vezes_comprado: loja.vezes_comprado,
         ultimo_valor: ocorrencias[0]?.valor_total,
+        ultimo_preco_unitario: ocorrencias[0]?.preco_unitario ?? null,
         ultima_data: ocorrencias[0]?.data_compra,
         menor_valor: menorOcorrencia?.valor_total,
+        menor_preco_unitario: menorOcorrencia?.preco_unitario ?? null,
+        unidade: menorOcorrencia?.unidade ?? null,
         ocorrencias,
       };
     });
@@ -157,6 +162,7 @@ export default async function handler(req, res) {
             quantidade: '$itens.quantidade',
             unidade: '$itens.unidade',
             valor_total: '$itens.valor_total',
+            preco_unitario: '$itens.preco_unitario',
           },
         },
         { $sort: { createdAt: -1 } },
@@ -176,11 +182,11 @@ export default async function handler(req, res) {
       // Última compra (mais recente)
       const ultimaCompra = historico[0];
 
-      // Menor preço encontrado entre os locais
+      // Menor preço por unidade (correto para quantidades diferentes)
       const menorPreco = historico.reduce((menor, atual) => {
-        const valorAtual = parseValor(atual.valor_total);
-        const valorMenor = parseValor(menor.valor_total);
-        return valorAtual < valorMenor ? atual : menor;
+        const vAtual = atual.preco_unitario ?? parseValor(atual.valor_total);
+        const vMenor = menor.preco_unitario ?? parseValor(menor.valor_total);
+        return vAtual < vMenor ? atual : menor;
       }, historico[0]);
 
       return res.json({
@@ -230,9 +236,9 @@ export default async function handler(req, res) {
         );
 
         const menorPreco = grupo.ocorrencias.reduce((menor, atual) => {
-          const valorAtual = parseValor(atual.valor_total);
-          const valorMenor = parseValor(menor.valor_total);
-          return valorAtual < valorMenor ? atual : menor;
+          const vAtual = atual.preco_unitario ?? parseValor(atual.valor_total);
+          const vMenor = menor.preco_unitario ?? parseValor(menor.valor_total);
+          return vAtual < vMenor ? atual : menor;
         }, grupo.ocorrencias[0]);
 
         return {

@@ -86,6 +86,24 @@ const savePurchase = async (url, resultado) => {
   }
 };
 
+
+function parseValorNum(valor) {
+  if (!valor) return null;
+  const limpo = String(valor)
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\.(?=\d{3},)/g, '')
+    .replace(',', '.');
+  const n = parseFloat(limpo);
+  return isNaN(n) ? null : n;
+}
+
+function calcPrecoUnitario(valor_total, quantidade) {
+  const vt = parseValorNum(valor_total);
+  const qt = parseValorNum(String(quantidade).replace(',', '.'));
+  if (!vt || !qt || qt === 0) return null;
+  return Math.round((vt / qt) * 100) / 100; // 2 casas
+}
+
 const extractTableRow = ($table, $) => {
   const row = $table.find('tbody tr').first();
   return row.find('td').toArray().map((td) => normalizeText($(td).text()));
@@ -138,6 +156,7 @@ const parseHtml = (html) => {
         quantidade: cols[1].replace(/.*?:\s*/, ''),
         unidade: cols[2].replace(/.*?:\s*/, ''),
         valor_total: cols[3].replace(/.*?:\s*/, ''),
+        preco_unitario: calcPrecoUnitario(cols[3].replace(/.*?:\s*/, ''), cols[1].replace(/.*?:\s*/, '')),
       });
     }
   });
