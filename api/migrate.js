@@ -1,7 +1,4 @@
-import 'dotenv/config';
-import { getDb, closeDb } from './db.js';
-
-// ── helpers ────────────────────────────────────────────────────────────────
+import { getDb } from '../db.js';
 
 function parseValorNum(valor) {
   if (!valor) return null;
@@ -29,92 +26,89 @@ function normalizeProductName(text = '') {
     .trim();
 }
 
-// ── migração ───────────────────────────────────────────────────────────────
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
 
-async function migrate() {
-  const db = await getDb();
-  const purchases = db.collection('purchases');
-  const products  = db.collection('products');
-
-  const total = await purchases.countDocuments();
-  console.log(`\n🔍 Encontradas ${total} compras no banco.\n`);
-
-  const cursor = purchases.find({});
-
-  let notasProcessadas  = 0;
-  let itensProcessados  = 0;
-  let produtosCriados   = 0;
-  let produtosExistentes = 0;
-  let itensAtualizados  = 0;
-
-  while (await cursor.hasNext()) {
-    const compra = await cursor.next();
-    notasProcessadas++;
-
-    const itensAtualizadosNota = [];
-
-    for (const item of compra.itens ?? []) {
-      itensProcessados++;
-
-      // calcula preco_unitario se ainda não existe
-      const preco_unitario =
-        item.preco_unitario ?? calcPrecoUnitario(item.valor_total, item.quantidade);
-
-      const nomeNormalizado = normalizeProductName(item.descricao);
-      const filter = item.codigo
-        ? { codigo: item.codigo }
-        : { nome_normalizado: nomeNormalizado };
-
-      const update = {
-        $setOnInsert: {
-          createdAt:        new Date(),
-          codigo:           item.codigo || null,
-          nome_original:    item.descricao,
-          nome_normalizado: nomeNormalizado,
-        },
-        $set: { updatedAt: new Date() },
-      };
-
-      const result = await products.findOneAndUpdate(filter, update, {
-        upsert: true,
-        returnDocument: 'after',
-      });
-
-      if (result.createdAt?.getTime() === result.updatedAt?.getTime()) {
-        produtosCriados++;
-      } else {
-        produtosExistentes++;
-      }
-
-      itensAtualizadosNota.push({
-        ...item,
-        descricao_normalizada: nomeNormalizado,
-        product_id:            result._id,
-        preco_unitario:        preco_unitario,
-      });
-    }
-
-    // Atualiza a compra com itens enriquecidos (preco_unitario + product_id)
-    await purchases.updateOne(
-      { _id: compra._id },
-      { $set: { itens: itensAtualizadosNota } }
-    );
-    itensAtualizados += itensAtualizadosNota.length;
-
-    process.stdout.write(`\r  Notas: ${notasProcessadas}/${total}  Itens: ${itensProcessados}`);
+  // Proteção por senha — defina MIGRATE_SECRET nas env vars da Vercel
+  const secret = process.env.MIGRATE_SECRET;
+  if (!secret || req.query.secret !== secret) {
+    return res.status(401).json({ error: 'Não autorizado. Informe ?secret=SUA_SENHA' });
   }
 
-  console.log('\n\n✅ Migração concluída!');
-  console.log(`   Notas processadas : ${notasProcessadas}`);
-  console.log(`   Itens processados : ${itensProcessados}`);
-  console.log(`   Produtos criados  : ${produtosCriados}`);
-  console.log(`   Produtos já existentes (sem duplicata): ${produtosExistentes}`);
-  console.log(`   Itens atualizados no purchases: ${itensAtualizados}\n`);
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Use POST /api/migrate?secret=SUA_SENHA' });
+  }
 
-  await closeDb();
+  try {
+    const db = await getDb();
+    const purchases = db.collection('purchases');
+    const products  = db.collection('products');
+
+    const todasCompras = await purchases.find({}).toArray();
+
+    let notasProcessadas   = 0;
+    let itensProcessados   = 0;
+    let produtosCriados    = 0;
+    let produtosExistentes = 0;
+
+    for (const compra of todasCompras) {
+      notasProcessadas++;
+      const itensEnriquecidos = [];
+
+      for (const item of compra.itens ?? []) {
+        itensProcessados++;
+
+        const preco_unitario =
+          item.preco_unitario ?? calcPrecoUnitario(item.valor_total, item.quantidade);
+
+        const nomeNormalizado = normalizeProductName(item.descricao);
+        const filter = item.codigo
+          ? { codigo: item.codigo }
+          : { nome_normalizado: nomeNormalizado };
+
+        const update = {
+          $setOnInsert: {
+            createdAt:        new Date(),
+            codigo:           item.codigo || null,
+            nome_original:    item.descricao,
+            nome_normalizado: nomeNormalizado,
+          },
+          $set: { updatedAt: new Date() },
+        };
+
+        const existingBefore = await products.findOne(filter);
+        await products.updateOne(filter, update, { upsert: true });
+        const result = await products.findOne(filter);
+
+        if (existingBefore) produtosExistentes++;
+        else produtosCriados++;
+
+        itensEnriquecidos.push({
+          ...item,
+          descricao_normalizada: nomeNormalizado,
+          product_id:            result._id,
+          preco_unitario,
+        });
+      }
+
+      await purchases.updateOne(
+        { _id: compra._id },
+        { $set: { itens: itensEnriquecidos } }
+      );
+    }
+
+    return res.json({
+      ok: true,
+      resumo: {
+        notas_processadas:    notasProcessadas,
+        itens_processados:    itensProcessados,
+        produtos_criados:     produtosCriados,
+        produtos_ja_existentes: produtosExistentes,
+      },
+    });
+
+  } catch (err) {
+    console.error('[migrate] Erro:', err.message, err.stack);
+    return res.status(500).json({ error: err.message });
+  }
 }
-
-migrate().catch((err) => {
-  console.error('\n❌ Erro durante a migração:', err.message);
-  process.exit(1);
-});
