@@ -700,6 +700,126 @@
     }
 
     .btn-voltar-busca:hover { color: var(--text-primary); }
+
+    /* Modo mesclar */
+    .sugestao-item.selecionado {
+      border-color: var(--accent);
+      background: var(--accent-bg);
+    }
+
+    .sugestao-item .sug-check {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 4px;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 13px;
+    }
+
+    .modo-mesclar .sugestao-item .sug-check {
+      display: flex;
+    }
+
+    .modo-mesclar .sugestao-item.selecionado .sug-check {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .mesclar-toolbar {
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border);
+    }
+
+    .mesclar-toolbar.ativa { display: flex; }
+
+    .mesclar-toolbar label {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .mesclar-toolbar input {
+      width: 100%;
+      height: 38px;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 0 10px;
+      font-size: 13px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+    }
+
+    .mesclar-toolbar input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-bg);
+    }
+
+    .mesclar-acoes {
+      display: flex;
+      gap: 6px;
+    }
+
+    .btn-mesclar-confirmar {
+      flex: 1;
+      height: 36px;
+      border-radius: var(--radius-md);
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn-mesclar-confirmar:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-mesclar-cancelar {
+      height: 36px;
+      padding: 0 14px;
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border-strong);
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .btn-modo-mesclar {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: none;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 4px 10px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      float: right;
+    }
+
+    .btn-modo-mesclar:hover { background: var(--bg-secondary); }
+    .btn-modo-mesclar.ativo { color: var(--accent); border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -1066,10 +1186,7 @@
 
     btnBuscarProduto.addEventListener('click', buscarProduto);
 
-    buscarResult.addEventListener('click', (e) => {
-      const item = e.target.closest('.sugestao-item');
-      if (item) buscarProduto(item.dataset.descricao);
-    });
+
     inputProduto.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') buscarProduto();
     });
@@ -1101,24 +1218,7 @@
         }
 
         // Mostra lista de sugestões para o usuário escolher
-        const sugestoesHtml = data.sugestoes.map((s) => `
-          <div class="sugestao-item" data-descricao="${s.descricao.replace(/"/g, '&quot;')}">
-            <div>
-              <p class="sug-nome">${s.descricao}</p>
-              <p class="sug-meta">${s.vezes} compra${s.vezes !== 1 ? 's' : ''} registrada${s.vezes !== 1 ? 's' : ''}</p>
-            </div>
-            <div class="sug-preco">
-              ${s.menor_preco_unitario
-                ? formatPrecoUnitario(s.menor_preco_unitario)
-                : formatValor(s.ultimo_valor)}
-            </div>
-          </div>
-        `).join('');
-
-        buscarResult.innerHTML = `
-          <p class="sugestao-titulo">Encontrei <strong>${data.total}</strong> produto${data.total !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
-          <div class="sugestao-lista">${sugestoesHtml}</div>
-        `;
+        renderSugestoes(data.sugestoes, termo);
       } catch (err) {
         buscarResult.innerHTML = alertHtml(err.message);
       }
@@ -1215,6 +1315,135 @@
       `;
     }
 
+
+    function renderSugestoes(sugestoes, termo) {
+      const sugestoesHtml = sugestoes.map((s) => `
+        <div class="sugestao-item" data-descricao="${s.descricao.replace(/"/g, '&quot;')}">
+          <div class="sug-check"><i class="ti ti-check" aria-hidden="true"></i></div>
+          <div style="flex:1; min-width:0;">
+            <p class="sug-nome">${s.descricao}</p>
+            <p class="sug-meta">${s.vezes} compra${s.vezes !== 1 ? 's' : ''} registrada${s.vezes !== 1 ? 's' : ''}</p>
+          </div>
+          <div class="sug-preco">
+            ${s.menor_preco_unitario
+              ? formatPrecoUnitario(s.menor_preco_unitario)
+              : formatValor(s.ultimo_valor)}
+          </div>
+        </div>
+      `).join('');
+
+      buscarResult.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <p class="sugestao-titulo" style="margin:0;">Encontrei <strong>${sugestoes.length}</strong> produto${sugestoes.length !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
+          <button class="btn-modo-mesclar" id="btn-modo-mesclar">
+            <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
+          </button>
+        </div>
+        <div class="sugestao-lista" id="sugestao-lista">${sugestoesHtml}</div>
+        <div class="mesclar-toolbar" id="mesclar-toolbar">
+          <label>Nome final do produto mesclado:</label>
+          <input type="text" id="input-nome-final" placeholder="ex: LEITE CAMPONESA 1L INTEGRAL" />
+          <div class="mesclar-acoes">
+            <button class="btn-mesclar-cancelar" id="btn-mesclar-cancelar">Cancelar</button>
+            <button class="btn-mesclar-confirmar" id="btn-mesclar-confirmar" disabled>
+              <i class="ti ti-git-merge" aria-hidden="true"></i>
+              <span id="mesclar-confirmar-label">Selecione 2 ou mais</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      // Modo mesclar toggle
+      let modoMesclar = false;
+      const btnModo = document.getElementById('btn-modo-mesclar');
+      const lista   = document.getElementById('sugestao-lista');
+      const toolbar = document.getElementById('mesclar-toolbar');
+      const inputNomeFinal = document.getElementById('input-nome-final');
+      const btnConfirmar   = document.getElementById('btn-mesclar-confirmar');
+      const labelConfirmar = document.getElementById('mesclar-confirmar-label');
+      const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
+
+      function getSelecionados() {
+        return [...lista.querySelectorAll('.sugestao-item.selecionado')]
+          .map((el) => el.dataset.descricao);
+      }
+
+      function atualizarToolbar() {
+        const sel = getSelecionados();
+        const ok  = sel.length >= 2 && inputNomeFinal.value.trim() !== '';
+        btnConfirmar.disabled = !ok;
+        labelConfirmar.textContent = sel.length < 2
+          ? `Selecione ${2 - sel.length} mais`
+          : `Mesclar ${sel.length} produtos`;
+        // Pre-fill nome com o mais comprado se só 1 selecionado
+        if (sel.length === 1 && !inputNomeFinal.value.trim()) {
+          inputNomeFinal.value = sel[0];
+        }
+      }
+
+      btnModo.addEventListener('click', () => {
+        modoMesclar = !modoMesclar;
+        lista.classList.toggle('modo-mesclar', modoMesclar);
+        toolbar.classList.toggle('ativa', modoMesclar);
+        btnModo.classList.toggle('ativo', modoMesclar);
+        btnModo.innerHTML = modoMesclar
+          ? '<i class="ti ti-x" aria-hidden="true"></i> Cancelar'
+          : '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+        if (!modoMesclar) {
+          lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+          inputNomeFinal.value = '';
+          btnConfirmar.disabled = true;
+        }
+      });
+
+      lista.addEventListener('click', (e) => {
+        const item = e.target.closest('.sugestao-item');
+        if (!item) return;
+        if (modoMesclar) {
+          item.classList.toggle('selecionado');
+          atualizarToolbar();
+        } else {
+          buscarProduto(item.dataset.descricao);
+        }
+      });
+
+      inputNomeFinal.addEventListener('input', atualizarToolbar);
+
+      btnCancelar.addEventListener('click', () => {
+        modoMesclar = false;
+        lista.classList.remove('modo-mesclar');
+        toolbar.classList.remove('ativa');
+        btnModo.classList.remove('ativo');
+        btnModo.innerHTML = '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+        lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+        inputNomeFinal.value = '';
+        btnConfirmar.disabled = true;
+      });
+
+      btnConfirmar.addEventListener('click', async () => {
+        const descricoes  = getSelecionados();
+        const nome_final  = inputNomeFinal.value.trim();
+        if (descricoes.length < 2 || !nome_final) return;
+
+        btnConfirmar.disabled = true;
+        labelConfirmar.textContent = 'Mesclando...';
+
+        try {
+          const data = await apiPost('/mesclar-produtos', { descricoes, nome_final });
+          buscarResult.innerHTML = `
+            <div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">
+              <i class="ti ti-check" aria-hidden="true"></i>
+              <strong>${data.nome_final}</strong> criado — ${data.produtos_mesclados} produtos mesclados em ${data.notas_atualizadas} nota(s).
+            </div>
+            <button class="btn-voltar-busca" onclick="buscarProduto()">
+              <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
+            </button>
+          `;
+        } catch (err) {
+          buscarResult.innerHTML = alertHtml(err.message);
+        }
+      });
+    }
     // ---------- Aba: Itens recorrentes ----------
     const btnRecorrentes = document.getElementById('btn-carregar-recorrentes');
     const recorrentesResult = document.getElementById('recorrentes-result');
