@@ -86,52 +86,13 @@ const savePurchase = async (url, resultado) => {
     }
 
     // Upsert cada item no catálogo de produtos e enriquecer com product_id + nome_normalizado
-    const products = db.collection('products');
     const itensEnriquecidos = await Promise.all(
       resultado.itens.map(async (item) => {
-        const nomeNormOriginal = normalizeProductName(item.descricao);
-        
-        // --- LÓGICA DE AUTO-MERGE ---
-        // Verifica se este produto (nome original) já foi mesclado anteriormente
-        // Procuramos por um produto que tenha este nome como 'descricao_original' em alguma compra
-        // Mas uma forma mais eficiente é olhar na coleção 'products' se o nome original 
-        // foi "substituído" por um canônico.
-        
-        // Vamos buscar se existe um produto que tenha esse nome original registrado
-        // Se o produto encontrado tiver um nome_original diferente do atual, 
-        // significa que ele foi mesclado.
-        const existingProduct = await products.findOne({ 
-          $or: [
-            { nome_normalizado: nomeNormOriginal },
-            { codigo: item.codigo }
-          ]
-        });
-
-        let finalDescricao = item.descricao;
-        let finalNorm = nomeNormOriginal;
-        let finalProductId = null;
-        let descOriginalParaSalvar = null;
-
-        if (existingProduct) {
-          finalDescricao = existingProduct.nome_original;
-          finalNorm = existingProduct.nome_normalizado;
-          finalProductId = existingProduct._id;
-          
-          // Se o nome que veio na nota é diferente do nome que temos no banco (mesclado)
-          // guardamos o nome da nota como 'descricao_original' para permitir desfazer depois
-          if (normalizeProductName(item.descricao) !== finalNorm) {
-            descOriginalParaSalvar = item.descricao;
-          }
-        } else {
-          finalProductId = await upsertProduct(db, item);
-        }
-
+        const productId = await upsertProduct(db, item);
         return {
           ...item,
-          descricao: finalDescricao,
-          descricao_normalizada: finalNorm,
-          product_id: finalProductId,
-          ...(descOriginalParaSalvar ? { descricao_original: descOriginalParaSalvar } : {})
+          descricao_normalizada: normalizeProductName(item.descricao),
+          product_id: productId,
         };
       })
     );
