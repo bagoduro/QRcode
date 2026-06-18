@@ -79,7 +79,6 @@ export default async function handler(req, res) {
           },
           ultimo_valor: { $last: '$itens.valor_total' },
           ultimo_local: { $last: '$emitente.nome' },
-          mesclado: { $max: { $cond: [{ $ifNull: ['$itens.descricao_original', false] }, true, false] } },
         },
       },
       { $sort: { vezes: -1 } },
@@ -99,7 +98,6 @@ export default async function handler(req, res) {
         menor_preco_unitario: s.menor_preco_unitario,
         ultimo_valor: s.ultimo_valor,
         ultimo_local: s.ultimo_local,
-        mesclado: s.mesclado,
       })),
     });
   }

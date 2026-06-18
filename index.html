@@ -1482,8 +1482,9 @@
       const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
 
       // Verificar se o termo pesquisado é um produto mesclado para mostrar o botão "Desfazer"
-      // Agora usamos a flag 'mesclado' que o backend retorna
-      if (sugestoes.length === 1 && sugestoes[0].mesclado) {
+      if (sugestoes.length === 1 && sugestoes[0].descricao.toLowerCase() === termo.toLowerCase()) {
+         // Se só tem 1 resultado e é exatamente o que foi buscado, pode ser um mesclado
+         // Vamos mostrar o botão e deixar o backend validar se tem 'descricao_original'
          btnDesfazer.style.display = 'flex';
       }
 
