@@ -650,107 +650,61 @@ app.listen(port, () => {
 });
 
 // POST /mesclar-produtos
-function normMesclar(text = '') {
-  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-// GET /mesclar-produtos
-app.get('/mesclar-produtos', async (req, res) => {
-  try {
-    const db = await getDb();
-    const historico = await db.collection('merge_log').find({}).sort({ createdAt: -1 }).limit(50).toArray();
-    return res.json({ total: historico.length, historico });
-  } catch (err) { return res.status(500).json({ error: err.message }); }
-});
-
-// DELETE /mesclar-produtos?id=...
-app.delete('/mesclar-produtos', async (req, res) => {
-  const { id } = req.query;
-  if (!id) return res.status(400).json({ error: 'Informe o "id".' });
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import('mongodb');
-    const oid = new ObjectId(id);
-    const purchases = db.collection('purchases');
-    const products  = db.collection('products');
-    const mergeLog  = db.collection('merge_log');
-    const entrada = await mergeLog.findOne({ _id: oid });
-    if (!entrada) return res.status(404).json({ error: 'Mesclagem não encontrada.' });
-    let notasRevertidas = 0;
-    for (const snap of entrada.snapshot) {
-      for (const itemSnap of snap.itens) {
-        const r = await purchases.updateOne(
-          { _id: snap.purchaseId },
-          { $set: {
-            ['itens.' + itemSnap.idx + '.descricao']: itemSnap.descricao,
-            ['itens.' + itemSnap.idx + '.descricao_normalizada']: itemSnap.descricao_normalizada,
-            ['itens.' + itemSnap.idx + '.product_id']: itemSnap.product_id,
-          }}
-        );
-        if (r.modifiedCount > 0) notasRevertidas++;
-      }
-    }
-    for (const prod of entrada.produtos_antigos) {
-      await products.updateOne({ nome_normalizado: prod.nome_normalizado }, { $setOnInsert: prod }, { upsert: true });
-    }
-    if (!entrada.nome_final_preexistia) {
-      await products.deleteOne({ nome_normalizado: normMesclar(entrada.nome_final) });
-    }
-    await mergeLog.deleteOne({ _id: oid });
-    return res.json({ ok: true, notas_revertidas: notasRevertidas });
-  } catch (err) { return res.status(500).json({ error: err.message }); }
-});
-
-// POST /mesclar-produtos
 app.post('/mesclar-produtos', async (req, res) => {
   const { descricoes, nome_final } = req.body || {};
-  if (!Array.isArray(descricoes) || descricoes.length < 2)
+
+  if (!Array.isArray(descricoes) || descricoes.length < 2) {
     return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
-  if (!nome_final || !nome_final.trim())
-    return res.status(400).json({ error: 'Informe o "nome_final".' });
+  }
+  if (!nome_final || !nome_final.trim()) {
+    return res.status(400).json({ error: 'Informe o "nome_final" para o produto mesclado.' });
+  }
+
   try {
     const db = await getDb();
     const purchases = db.collection('purchases');
     const products  = db.collection('products');
-    const mergeLog  = db.collection('merge_log');
-    const nomeFinal     = nome_final.trim();
-    const nomeFinalNorm = normMesclar(nomeFinal);
-    const nomeFinalPreexistia = !!(await products.findOne({ nome_normalizado: nomeFinalNorm }));
-    const produtosAntigos = await products.find({
-      nome_normalizado: { $in: descricoes.map(normMesclar).filter((n) => n !== nomeFinalNorm) },
-    }).toArray();
-    const snapshot = [];
-    for (const descricao of descricoes) {
-      const comprasAfetadas = await purchases.find({ 'itens.descricao': descricao }).toArray();
-      for (const compra of comprasAfetadas) {
-        const itensSnap = compra.itens
-          .map((item, idx) => ({ idx, descricao: item.descricao, descricao_normalizada: item.descricao_normalizada, product_id: item.product_id }))
-          .filter((item) => item.descricao === descricao);
-        if (itensSnap.length > 0) snapshot.push({ purchaseId: compra._id, itens: itensSnap });
-      }
-    }
+
+    const nomeFinal = nome_final.trim();
+    const nomeFinalNorm = nomeFinal
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+
     await products.updateOne(
       { nome_normalizado: nomeFinalNorm },
-      { $setOnInsert: { createdAt: new Date(), codigo: null }, $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() } },
+      {
+        $setOnInsert: { createdAt: new Date(), codigo: null },
+        $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() },
+      },
       { upsert: true }
     );
     const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
+
     let totalAtualizados = 0;
     for (const descricao of descricoes) {
       const result = await purchases.updateMany(
         { 'itens.descricao': descricao },
-        { $set: { 'itens.$[elem].descricao': nomeFinal, 'itens.$[elem].descricao_normalizada': nomeFinalNorm, 'itens.$[elem].product_id': produtoCanonico._id } },
+        {
+          $set: {
+            'itens.$[elem].descricao': nomeFinal,
+            'itens.$[elem].descricao_normalizada': nomeFinalNorm,
+            'itens.$[elem].product_id': produtoCanonico._id,
+          },
+        },
         { arrayFilters: [{ 'elem.descricao': descricao }] }
       );
       totalAtualizados += result.modifiedCount;
     }
-    await products.deleteMany({ nome_normalizado: { $in: descricoes.map(normMesclar).filter((n) => n !== nomeFinalNorm) } });
-    const logEntry = await mergeLog.insertOne({
-      createdAt: new Date(), nome_final: nomeFinal, descricoes_originais: descricoes,
-      notas_atualizadas: totalAtualizados, nome_final_preexistia: nomeFinalPreexistia,
-      produtos_antigos: produtosAntigos, snapshot,
-    });
-    return res.json({ ok: true, merge_id: logEntry.insertedId, nome_final: nomeFinal, produtos_mesclados: descricoes.length, notas_atualizadas: totalAtualizados });
+
+    const descNormsAntigas = descricoes
+      .map((d) => d.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim())
+      .filter((n) => n !== nomeFinalNorm);
+    await products.deleteMany({ nome_normalizado: { $in: descNormsAntigas } });
+
+    return res.json({ ok: true, nome_final: nomeFinal, produtos_mesclados: descricoes.length, notas_atualizadas: totalAtualizados });
   } catch (err) {
     console.error('[POST /mesclar-produtos] Erro:', err.message, err.stack);
     return res.status(500).json({ error: err.message });

@@ -820,17 +820,6 @@
 
     .btn-modo-mesclar:hover { background: var(--bg-secondary); }
     .btn-modo-mesclar.ativo { color: var(--accent); border-color: var(--accent); }
-
-    .merge-log-card { border:0.5px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:8px; }
-    .merge-log-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-    .merge-log-nome { font-size:13px; font-weight:500; margin:0; flex:1; }
-    .merge-log-de { font-size:11px; color:var(--text-secondary); margin-top:4px; }
-    .btn-reverter {
-      flex-shrink:0; height:28px; padding:0 10px; border-radius:var(--radius-md);
-      border:0.5px solid var(--danger); background:transparent; color:var(--danger);
-      font-size:11px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:4px;
-    }
-    .btn-reverter:hover { background:var(--danger-bg); }
   </style>
 </head>
 <body>
@@ -855,7 +844,6 @@
       <button class="tab-btn" data-tab="buscar"><i class="ti ti-search"></i><span>Buscar item</span></button>
       <button class="tab-btn" data-tab="recorrentes"><i class="ti ti-repeat"></i><span>Recorrentes</span></button>
       <button class="tab-btn" data-tab="historico"><i class="ti ti-receipt"></i><span>Compras</span></button>
-			<button class="tab-btn" data-tab="mesclagens"><i class="ti ti-git-merge"></i><span>Mesclagens</span></button>
     </nav>
 
     <!-- Aba: Ler nota (QR code) -->
@@ -1442,87 +1430,20 @@
 
         try {
           const data = await apiPost('/mesclar-produtos', { descricoes, nome_final });
-          buscarResult.innerHTML = ''
-            + '<div class="alert" style="background:var(--accent-bg);color:var(--accent-text);margin-bottom:8px;">'
-            + '<i class="ti ti-check" aria-hidden="true"></i> <strong>' + data.nome_final + '</strong>'
-            + ' criado — ' + data.produtos_mesclados + ' produtos mesclados em ' + data.notas_atualizadas + ' nota(s).'
-            + '</div>'
-            + '<button class="btn full" id="btn-desfazer-mescla" style="margin-bottom:8px;color:var(--danger);border-color:var(--danger);">'
-            + '<i class="ti ti-arrow-back-up" aria-hidden="true"></i> Desfazer mesclagem'
-            + '</button>'
-            + '<button class="btn-voltar-busca" id="btn-voltar-pos-mescla">'
-            + '<i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados'
-            + '</button>';
-          const mergeId = String(data.merge_id);
-          document.getElementById('btn-desfazer-mescla').addEventListener('click', async () => {
-            if (!confirm('Desfazer esta mesclagem e restaurar os nomes originais?')) return;
-            try {
-              await apiDelete('/mesclar-produtos', { id: mergeId });
-              buscarResult.innerHTML = '<div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">'
-                + '<i class="ti ti-check" aria-hidden="true"></i> Mesclagem desfeita com sucesso!</div>'
-                + '<button class="btn-voltar-busca" id="btn-voltar-pos-reverter">'
-                + '<i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados</button>';
-              document.getElementById('btn-voltar-pos-reverter').addEventListener('click', () => buscarProduto());
-            } catch (err) {
-              buscarResult.insertAdjacentHTML('afterbegin', alertHtml(err.message));
-            }
-          });
-          document.getElementById('btn-voltar-pos-mescla').addEventListener('click', () => buscarProduto());
+          buscarResult.innerHTML = `
+            <div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">
+              <i class="ti ti-check" aria-hidden="true"></i>
+              <strong>${data.nome_final}</strong> criado — ${data.produtos_mesclados} produtos mesclados em ${data.notas_atualizadas} nota(s).
+            </div>
+            <button class="btn-voltar-busca" onclick="buscarProduto()">
+              <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
+            </button>
+          `;
         } catch (err) {
           buscarResult.innerHTML = alertHtml(err.message);
         }
       });
     }
-
-    // ---------- Aba: Mesclagens ----------
-    const btnMesclagens    = document.getElementById('btn-carregar-mesclagens');
-    const mesclagensResult = document.getElementById('mesclagens-result');
-    btnMesclagens.addEventListener('click', carregarMesclagens);
-
-    async function carregarMesclagens() {
-      mesclagensResult.innerHTML = loadingHtml('Carregando...');
-      try {
-        const data = await apiGet('/mesclar-produtos');
-        if (!data.historico || data.historico.length === 0) {
-          mesclagensResult.innerHTML = emptyHtml('ti-git-merge', 'Nenhuma mesclagem registrada ainda.');
-          return;
-        }
-        const cards = data.historico.map((m) => {
-          const originais = (m.descricoes_originais || []).join(', ');
-          const dt        = new Date(m.createdAt).toLocaleString('pt-BR');
-          return '<div class="merge-log-card" id="merge-' + m._id + '">'
-            + '<div class="merge-log-header"><div>'
-            + '<p class="merge-log-nome">' + m.nome_final + '</p>'
-            + '<p class="merge-log-de">Mesclou: ' + originais + '</p>'
-            + '<p class="merge-log-de">' + dt + ' • ' + m.notas_atualizadas + ' nota(s)</p>'
-            + '</div>'
-            + '<button class="btn-reverter" data-id="' + m._id + '" data-nome="' + m.nome_final.replace(/"/g, '&quot;') + '">'
-            + '<i class="ti ti-arrow-back-up" aria-hidden="true"></i> Reverter</button>'
-            + '</div></div>';
-        }).join('');
-        mesclagensResult.innerHTML = '<div class="item-list">' + cards + '</div>';
-        mesclagensResult.addEventListener('click', async (e) => {
-          const btn = e.target.closest('.btn-reverter');
-          if (!btn) return;
-          const id   = btn.dataset.id;
-          const nome = btn.dataset.nome;
-          if (!confirm('Reverter a mesclagem de "' + nome + '"? Os produtos voltarão aos nomes originais.')) return;
-          btn.innerHTML = 'Revertendo...';
-          btn.disabled  = true;
-          try {
-            await apiDelete('/mesclar-produtos', { id });
-            const card = document.getElementById('merge-' + id);
-            if (card) { card.style.transition = 'opacity .3s'; card.style.opacity = '0'; setTimeout(() => card.remove(), 300); }
-          } catch (err) {
-            btn.textContent = 'Erro';
-            mesclagensResult.insertAdjacentHTML('afterbegin', alertHtml(err.message));
-          }
-        });
-      } catch (err) {
-        mesclagensResult.innerHTML = alertHtml(err.message);
-      }
-    }
-
     // ---------- Aba: Itens recorrentes ----------
     const btnRecorrentes = document.getElementById('btn-carregar-recorrentes');
     const recorrentesResult = document.getElementById('recorrentes-result');
