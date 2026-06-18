@@ -2,6 +2,20 @@ import 'dotenv/config';
 import express from 'express';
 import { load } from 'cheerio';
 import { getDb } from './db.js';
+import authHandler, { verifyJwt } from './api/auth.js';
+
+// ── Middleware: exige token JWT válido ────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const auth  = req.headers?.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Não autenticado.' });
+  const payload = verifyJwt(token);
+  if (!payload) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  req.user = payload;
+  next();
+}
+
+
 
 const app = express();
 const port = process.env.PORT || 3333;
@@ -220,7 +234,7 @@ const fetchAndParseUrl = async (url) => {
   return parseHtml(html);
 };
 
-app.post('/consulta-qrcode', async (req, res) => {
+app.post('/consulta-qrcode', requireAuth, async (req, res) => {
   const { url } = req.body;
   console.log('[POST /consulta-qrcode] Requisição recebida:', { url });
   
@@ -246,6 +260,14 @@ app.post('/consulta-qrcode', async (req, res) => {
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
   }
 });
+
+
+// ── Rotas de autenticação ─────────────────────────────────────────────────────
+app.get('/api/auth', (req, res) => authHandler(req, res));
+app.post('/api/auth', (req, res) => authHandler(req, res));
+// (rota sem prefixo para compatibilidade com fetch('/api/auth') do front)
+app.get('/auth', (req, res) => authHandler(req, res));
+app.post('/auth', (req, res) => authHandler(req, res));
 
 app.get('/', (req, res) => {
   res.type('text/plain').send(
@@ -617,7 +639,7 @@ app.get('/historico-compras', async (req, res) => {
   }
 });
 
-app.delete('/historico-compras', async (req, res) => {
+app.delete('/historico-compras', requireAuth, async (req, res) => {
   const { url } = req.query;
 
   if (!url) {
@@ -650,7 +672,7 @@ app.listen(port, () => {
 });
 
 // POST /mesclar-produtos
-app.post('/mesclar-produtos', async (req, res) => {
+app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const { descricoes, nome_final } = req.body || {};
 
   if (!Array.isArray(descricoes) || descricoes.length < 2) {

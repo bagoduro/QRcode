@@ -821,9 +821,86 @@
 
     .btn-modo-mesclar:hover { background: var(--bg-secondary); }
     .btn-modo-mesclar.ativo { color: var(--accent); border-color: var(--accent); }
+
+    /* ── Auth overlay ─────────────────────────────────────────────────────── */
+    .auth-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: var(--bg-primary);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+    .auth-overlay.hidden { display: none; }
+    .auth-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 2rem 1.75rem;
+      width: 100%; max-width: 380px;
+    }
+    .auth-card h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+    .auth-card .auth-subtitle {
+      color: var(--text-secondary); font-size: .875rem; margin: 0 0 1.5rem;
+    }
+    .auth-field { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; }
+    .auth-field label { font-size: .8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+    .auth-field input {
+      padding: .65rem .75rem; border-radius: var(--radius-md);
+      border: 1px solid var(--border-strong); background: var(--bg-primary);
+      font-size: .95rem; color: var(--text-primary); outline: none;
+      transition: border-color .15s;
+    }
+    .auth-field input:focus { border-color: var(--accent); }
+    .auth-error { color: var(--danger); font-size: .85rem; margin-bottom: .75rem; min-height: 1.2em; }
+    .auth-toggle { font-size: .85rem; color: var(--text-secondary); margin-top: 1rem; text-align: center; }
+    .auth-toggle button { background: none; border: none; color: var(--accent); cursor: pointer; font-size: .85rem; padding: 0; text-decoration: underline; }
+
+    /* ── Elementos só visíveis para logados ─────────────────────────────── */
+    .somente-logado { display: none !important; }
+    body.autenticado .somente-logado { display: revert !important; }
+
+    /* ── Botão de logout no header ───────────────────────────────────────── */
+    .header-auth {
+      display: flex; align-items: center; gap: .6rem;
+      position: absolute; top: 1rem; right: 1rem;
+    }
+    .header-auth .auth-user { font-size: .8rem; color: var(--text-secondary); }
+    .btn-logout {
+      font-size: .75rem; padding: .3rem .7rem;
+      background: none; border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md); cursor: pointer; color: var(--text-secondary);
+    }
+    .btn-logout:hover { background: var(--bg-tertiary); }
+    .btn-entrar {
+      font-size: .8rem; padding: .35rem .8rem;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: var(--radius-md); cursor: pointer;
+    }
+    header { position: relative; }
   </style>
 </head>
 <body>
+  <!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
+  <div class="auth-overlay hidden" id="auth-overlay">
+    <div class="auth-card">
+      <h2 id="auth-title">Entrar</h2>
+      <p class="auth-subtitle" id="auth-subtitle">Acesse para salvar e editar notas</p>
+      <div class="auth-error" id="auth-error"></div>
+      <div class="auth-field">
+        <label for="auth-username">Usuário</label>
+        <input type="text" id="auth-username" placeholder="seu_usuario" autocomplete="username" />
+      </div>
+      <div class="auth-field">
+        <label for="auth-password">Senha</label>
+        <input type="password" id="auth-password" placeholder="••••••" autocomplete="current-password" />
+      </div>
+      <button class="btn primary full" id="auth-submit-btn" style="margin-top:.25rem;">Entrar</button>
+      <div class="auth-toggle">
+        <span id="auth-toggle-text">Não tem conta?</span>
+        <button id="auth-toggle-btn">Cadastrar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="modal-excluir">
     <div class="modal-box">
       <h3>Excluir nota</h3>
@@ -836,12 +913,17 @@
   </div>
   <div class="app">
     <header>
+    <div class="header-auth">
+      <span class="auth-user" id="header-username"></span>
+      <button class="btn-logout somente-logado" id="btn-logout"><i class="ti ti-logout"></i> Sair</button>
+      <button class="btn-entrar" id="btn-abrir-login"><i class="ti ti-login"></i> Entrar</button>
+    </div>
       <h1>Histórico de compras</h1>
       <p>Leia notas fiscais por QR code e compare preços entre estabelecimentos</p>
     </header>
 
     <nav class="tabs">
-      <button class="tab-btn active" data-tab="leitor"><i class="ti ti-qrcode"></i><span>Ler nota</span></button>
+      <button class="tab-btn active somente-logado" data-tab="leitor"><i class="ti ti-qrcode"></i><span>Ler nota</span></button>
       <button class="tab-btn" data-tab="buscar"><i class="ti ti-search"></i><span>Buscar item</span></button>
       <button class="tab-btn" data-tab="recorrentes"><i class="ti ti-repeat"></i><span>Recorrentes</span></button>
       <button class="tab-btn" data-tab="historico"><i class="ti ti-receipt"></i><span>Compras</span></button>
@@ -1263,7 +1345,7 @@
             <button class="btn-voltar-busca" onclick="buscarProduto()" style="margin:0;">
               <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
             </button>
-            <button class="btn-modo-mesclar" id="btn-desfazer-mesclagem-hist" title="Desfazer mesclagem deste produto" style="font-size:12px; height:32px; display:none;">
+            <button class="btn-modo-mesclar somente-logado" id="btn-desfazer-mesclagem-hist" title="Desfazer mesclagem deste produto" style="font-size:12px; height:32px; display:none;">
               <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer Mesclagem
             </button>
           </div>
@@ -1366,10 +1448,10 @@
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
           <p class="sugestao-titulo" style="margin:0;">Encontrei <strong>${sugestoes.length}</strong> produto${sugestoes.length !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
           <div style="display:flex; gap:8px;">
-            <button class="btn-modo-mesclar" id="btn-desfazer-mesclagem" title="Desfazer mesclagem deste produto" style="display:none;">
+            <button class="btn-modo-mesclar somente-logado" id="btn-desfazer-mesclagem" title="Desfazer mesclagem deste produto" style="display:none;">
               <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer
             </button>
-            <button class="btn-modo-mesclar" id="btn-modo-mesclar">
+            <button class="btn-modo-mesclar somente-logado" id="btn-modo-mesclar">
               <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
             </button>
           </div>
@@ -1643,7 +1725,7 @@
               <div class="meta">${formatData(c.data_compra)} • ${c.quantidade_itens || (c.itens || []).length} ite${(c.itens||[]).length === 1 ? 'm' : 'ns'}</div>
               <div class="nota-itens">
                 ${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}
-                <button class="btn-excluir-nota" onclick="event.stopPropagation(); excluirNota('${urlEncoded}', ${idx})">
+                <button class="btn-excluir-nota somente-logado" onclick="event.stopPropagation(); excluirNota('${urlEncoded}', ${idx})">
                   <i class="ti ti-trash" aria-hidden="true"></i> Excluir esta nota
                 </button>
               </div>
@@ -1659,6 +1741,170 @@
         historicoResult.innerHTML = alertHtml(err.message);
       }
     }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // AUTH — Login / Cadastro / Logout
+    // ════════════════════════════════════════════════════════════════════════
+    const AUTH_KEY = 'qr_auth_token';
+
+    function getToken()         { return localStorage.getItem(AUTH_KEY); }
+    function setToken(t)        { localStorage.setItem(AUTH_KEY, t); }
+    function clearToken()       { localStorage.removeItem(AUTH_KEY); }
+
+    function setAuthHeaders(opts = {}) {
+      const token = getToken();
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      return { ...opts, headers };
+    }
+
+    // Aplica estado visual: body.autenticado controla .somente-logado via CSS
+    function applyAuthState(loggedIn, username) {
+      if (loggedIn) {
+        document.body.classList.add('autenticado');
+        document.getElementById('header-username').textContent = username || '';
+        document.getElementById('btn-abrir-login').style.display = 'none';
+      } else {
+        document.body.classList.remove('autenticado');
+        document.getElementById('header-username').textContent = '';
+        document.getElementById('btn-abrir-login').style.display = '';
+        // Se estava na aba leitor, redirecionar para buscar (somente leitura)
+        const activeTab = document.querySelector('.tab-btn.active');
+        if (activeTab && activeTab.dataset.tab === 'leitor') {
+          document.querySelector('[data-tab="buscar"]').click();
+        }
+      }
+    }
+
+    // Verifica token salvo ao carregar a página
+    async function checkAuthOnLoad() {
+      const token = getToken();
+      if (!token) { applyAuthState(false); return; }
+      try {
+        const res = await fetch('/auth?action=me', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
+        const data = await res.json();
+        if (data.loggedIn) {
+          applyAuthState(true, data.user.username);
+        } else {
+          clearToken();
+          applyAuthState(false);
+        }
+      } catch {
+        applyAuthState(false);
+      }
+    }
+
+    // ── Patch nas funções de API para sempre enviar o token ─────────────────
+    // Sobrescreve apiGet, apiPost, apiDelete para incluir Authorization header
+    const _origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init = {}) {
+      const token = getToken();
+      if (token && typeof input === 'string' && input.startsWith('/api')) {
+        init.headers = { ...(init.headers || {}), 'Authorization': 'Bearer ' + token };
+      }
+      return _origFetch(input, init);
+    };
+
+    // ── UI do modal de auth ──────────────────────────────────────────────────
+    const authOverlay   = document.getElementById('auth-overlay');
+    const authTitle     = document.getElementById('auth-title');
+    const authSubtitle  = document.getElementById('auth-subtitle');
+    const authError     = document.getElementById('auth-error');
+    const authUsername  = document.getElementById('auth-username');
+    const authPassword  = document.getElementById('auth-password');
+    const authSubmitBtn = document.getElementById('auth-submit-btn');
+    const authToggleBtn = document.getElementById('auth-toggle-btn');
+    const authToggleTxt = document.getElementById('auth-toggle-text');
+    const btnAbrirLogin = document.getElementById('btn-abrir-login');
+    const btnLogout     = document.getElementById('btn-logout');
+
+    let authMode = 'login'; // 'login' | 'register'
+
+    function openAuthModal(mode = 'login') {
+      authMode = mode;
+      authError.textContent = '';
+      authUsername.value = '';
+      authPassword.value = '';
+      authTitle.textContent     = mode === 'login' ? 'Entrar' : 'Cadastrar';
+      authSubtitle.textContent  = mode === 'login' ? 'Acesse para salvar e editar notas' : 'Crie sua conta para começar';
+      authSubmitBtn.textContent = mode === 'login' ? 'Entrar' : 'Criar conta';
+      authToggleTxt.textContent = mode === 'login' ? 'Não tem conta?' : 'Já tem conta?';
+      authToggleBtn.textContent = mode === 'login' ? 'Cadastrar' : 'Entrar';
+      authOverlay.classList.remove('hidden');
+      authUsername.focus();
+    }
+
+    function closeAuthModal() {
+      authOverlay.classList.add('hidden');
+    }
+
+    authToggleBtn.addEventListener('click', () => {
+      openAuthModal(authMode === 'login' ? 'register' : 'login');
+    });
+
+    btnAbrirLogin.addEventListener('click', () => openAuthModal('login'));
+
+    btnLogout.addEventListener('click', () => {
+      clearToken();
+      applyAuthState(false);
+    });
+
+    authSubmitBtn.addEventListener('click', async () => {
+      const username = authUsername.value.trim();
+      const password = authPassword.value;
+      authError.textContent = '';
+
+      if (!username || !password) {
+        authError.textContent = 'Preencha usuário e senha.';
+        return;
+      }
+
+      authSubmitBtn.disabled = true;
+      authSubmitBtn.textContent = 'Aguarde...';
+
+      try {
+        const res = await _origFetch('/auth?action=' + authMode, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          authError.textContent = data.error || 'Erro ao autenticar.';
+        } else {
+          setToken(data.token);
+          applyAuthState(true, data.username);
+          closeAuthModal();
+        }
+      } catch (err) {
+        authError.textContent = 'Erro de conexão.';
+      } finally {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = authMode === 'login' ? 'Entrar' : 'Criar conta';
+      }
+    });
+
+    // Enter nos inputs do auth
+    [authUsername, authPassword].forEach(el => {
+      el.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmitBtn.click(); });
+    });
+
+    // ── Interceptar clique na aba "Ler nota" se não estiver logado ───────────
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        if (btn.dataset.tab === 'leitor' && !getToken()) {
+          e.stopImmediatePropagation();
+          openAuthModal('login');
+        }
+      }, true); // capture phase, antes do handler de troca de aba
+    });
+
+    // ── Inicializa ─────────────────────────────────────────────────────────
+    checkAuthOnLoad();
+
   </script>
 </body>
 </html>
