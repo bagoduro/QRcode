@@ -635,71 +635,191 @@
       margin-top: 4px;
     }
 
-    .sugestao-lista { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+    .sugestao-lista {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
     .sugestao-item {
-      display:flex; align-items:center; padding:10px 12px;
-      border:0.5px solid var(--border); border-radius:var(--radius-md);
-      cursor:pointer; transition:border-color .15s,background .15s; gap:8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px;
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      gap: 8px;
     }
-    .sugestao-item:hover { border-color:var(--accent); background:var(--accent-bg); }
-    .sugestao-item.selecionado { border-color:var(--accent); background:var(--accent-bg); }
-    .sug-check {
-      display:none; width:18px; height:18px; border:1.5px solid var(--border-strong);
-      border-radius:4px; flex-shrink:0; align-items:center; justify-content:center;
-      color:var(--accent); font-size:13px;
+
+    .sugestao-item:hover {
+      border-color: var(--accent);
+      background: var(--accent-bg);
     }
-    .modo-mesclar .sug-check { display:flex; }
-    .modo-mesclar .sugestao-item.selecionado .sug-check { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .sug-nome { font-size:13px; font-weight:500; flex:1; min-width:0; margin:0; }
-    .sug-meta { font-size:11px; color:var(--text-secondary); margin-top:2px; }
-    .sug-preco { font-size:12px; font-weight:500; color:var(--accent-text); white-space:nowrap; text-align:right; }
-    .sugestao-titulo { font-size:13px; color:var(--text-secondary); margin:0 0 8px; }
+
+    .sugestao-item .sug-nome {
+      font-size: 13px;
+      font-weight: 500;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sugestao-item .sug-meta {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+
+    .sugestao-item .sug-preco {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent-text);
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    .sugestao-titulo {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 8px;
+    }
+
     .btn-voltar-busca {
-      display:inline-flex; align-items:center; gap:4px; font-size:12px;
-      color:var(--text-secondary); background:none; border:none; cursor:pointer; padding:0; margin-bottom:12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      margin-bottom: 12px;
     }
-    .btn-voltar-busca:hover { color:var(--text-primary); }
-    .btn-modo-mesclar {
-      display:inline-flex; align-items:center; gap:4px; font-size:12px;
-      color:var(--text-secondary); background:none; border:0.5px solid var(--border-strong);
-      border-radius:var(--radius-md); padding:4px 10px; cursor:pointer;
+
+    .btn-voltar-busca:hover { color: var(--text-primary); }
+
+    /* Modo mesclar */
+    .sugestao-item.selecionado {
+      border-color: var(--accent);
+      background: var(--accent-bg);
     }
-    .btn-modo-mesclar:hover { background:var(--bg-secondary); }
-    .btn-modo-mesclar.ativo { color:var(--accent); border-color:var(--accent); }
+
+    .sugestao-item .sug-check {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 4px;
+      flex-shrink: 0;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 13px;
+    }
+
+    .modo-mesclar .sugestao-item .sug-check {
+      display: flex;
+    }
+
+    .modo-mesclar .sugestao-item.selecionado .sug-check {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
     .mesclar-toolbar {
-      display:none; flex-direction:column; gap:8px; margin-top:12px;
-      padding:12px; background:var(--bg-secondary); border-radius:var(--radius-md); border:0.5px solid var(--border);
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 12px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border);
     }
-    .mesclar-toolbar.ativa { display:flex; }
-    .mesclar-toolbar label { font-size:12px; color:var(--text-secondary); }
+
+    .mesclar-toolbar.ativa { display: flex; }
+
+    .mesclar-toolbar label {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
     .mesclar-toolbar input {
-      width:100%; height:38px; border:0.5px solid var(--border-strong);
-      border-radius:var(--radius-md); padding:0 10px; font-size:13px;
-      background:var(--bg-primary); color:var(--text-primary); font-family:var(--font-sans);
+      width: 100%;
+      height: 38px;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 0 10px;
+      font-size: 13px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
     }
-    .mesclar-toolbar input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-bg); }
-    .mesclar-acoes { display:flex; gap:6px; }
+
+    .mesclar-toolbar input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-bg);
+    }
+
+    .mesclar-acoes {
+      display: flex;
+      gap: 6px;
+    }
+
     .btn-mesclar-confirmar {
-      flex:1; height:36px; border-radius:var(--radius-md); border:none;
-      background:var(--accent); color:#fff; font-size:13px; font-weight:500;
-      cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px;
+      flex: 1;
+      height: 36px;
+      border-radius: var(--radius-md);
+      border: none;
+      background: var(--accent);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
-    .btn-mesclar-confirmar:disabled { opacity:.45; cursor:not-allowed; }
+
+    .btn-mesclar-confirmar:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
     .btn-mesclar-cancelar {
-      height:36px; padding:0 14px; border-radius:var(--radius-md);
-      border:0.5px solid var(--border-strong); background:var(--bg-primary);
-      color:var(--text-secondary); font-size:13px; cursor:pointer;
+      height: 36px;
+      padding: 0 14px;
+      border-radius: var(--radius-md);
+      border: 0.5px solid var(--border-strong);
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
     }
-    .merge-log-card { border:0.5px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:8px; }
-    .merge-log-header { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
-    .merge-log-nome { font-size:13px; font-weight:500; margin:0; flex:1; }
-    .merge-log-de { font-size:11px; color:var(--text-secondary); margin-top:4px; }
-    .btn-reverter {
-      flex-shrink:0; height:28px; padding:0 10px; border-radius:var(--radius-md);
-      border:0.5px solid var(--danger); background:transparent; color:var(--danger);
-      font-size:11px; font-weight:500; cursor:pointer; display:flex; align-items:center; gap:4px;
+
+    .btn-modo-mesclar {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: none;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      padding: 4px 10px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      float: right;
     }
-    .btn-reverter:hover { background:var(--danger-bg); }
+
+    .btn-modo-mesclar:hover { background: var(--bg-secondary); }
+    .btn-modo-mesclar.ativo { color: var(--accent); border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -724,7 +844,6 @@
       <button class="tab-btn" data-tab="buscar"><i class="ti ti-search"></i><span>Buscar item</span></button>
       <button class="tab-btn" data-tab="recorrentes"><i class="ti ti-repeat"></i><span>Recorrentes</span></button>
       <button class="tab-btn" data-tab="historico"><i class="ti ti-receipt"></i><span>Compras</span></button>
-			<button class="tab-btn" data-tab="mesclagens"><i class="ti ti-git-merge"></i><span>Mesclagens</span></button>
     </nav>
 
     <!-- Aba: Ler nota (QR code) -->
@@ -1066,6 +1185,8 @@
     const buscarResult = document.getElementById('buscar-result');
 
     btnBuscarProduto.addEventListener('click', buscarProduto);
+
+
     inputProduto.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') buscarProduto();
     });
@@ -1074,11 +1195,13 @@
       const termo = termoExato || inputProduto.value.trim();
       if (!termo) return;
 
+      // Se for busca exata (usuário escolheu uma sugestão), vai direto ao histórico
       if (termoExato) {
         await mostrarHistoricoProduto(termoExato);
         return;
       }
 
+      // Busca sugestões primeiro
       buscarResult.innerHTML = loadingHtml('Buscando...');
       try {
         const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
@@ -1088,150 +1211,17 @@
           return;
         }
 
+        // Se só tem 1 produto, vai direto
         if (data.sugestoes.length === 1) {
           await mostrarHistoricoProduto(data.sugestoes[0].descricao);
           return;
         }
 
+        // Mostra lista de sugestões para o usuário escolher
         renderSugestoes(data.sugestoes, termo);
       } catch (err) {
         buscarResult.innerHTML = alertHtml(err.message);
       }
-    }
-
-    function renderSugestoes(sugestoes, termo) {
-      const sugestoesHtml = sugestoes.map((s) => {
-        const desc = s.descricao.replace(/"/g, '&quot;');
-        const preco = s.menor_preco_unitario
-          ? formatPrecoUnitario(s.menor_preco_unitario)
-          : formatValor(s.ultimo_valor);
-        const vezes = s.vezes;
-        return '<div class="sugestao-item" data-descricao="' + desc + '">'
-          + '<div class="sug-check"><i class="ti ti-check" aria-hidden="true"></i></div>'
-          + '<div style="flex:1;min-width:0;">'
-          + '<p class="sug-nome">' + s.descricao + '</p>'
-          + '<p class="sug-meta">' + vezes + ' compra' + (vezes !== 1 ? 's' : '') + ' registrada' + (vezes !== 1 ? 's' : '') + '</p>'
-          + '</div>'
-          + '<div class="sug-preco">' + preco + '</div>'
-          + '</div>';
-      }).join('');
-
-      buscarResult.innerHTML = ''
-        + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'
-        + '<p class="sugestao-titulo" style="margin:0;">Encontrei <strong>' + sugestoes.length + '</strong> produto' + (sugestoes.length !== 1 ? 's' : '') + ' com &ldquo;<strong>' + termo + '</strong>&rdquo;. Qual você quer ver?</p>'
-        + '<button class="btn-modo-mesclar" id="btn-modo-mesclar"><i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar</button>'
-        + '</div>'
-        + '<div class="sugestao-lista" id="sugestao-lista">' + sugestoesHtml + '</div>'
-        + '<div class="mesclar-toolbar" id="mesclar-toolbar">'
-        + '<label>Nome final do produto mesclado:</label>'
-        + '<input type="text" id="input-nome-final" placeholder="ex: LEITE CAMPONESA 1L INTEGRAL" />'
-        + '<div class="mesclar-acoes">'
-        + '<button class="btn-mesclar-cancelar" id="btn-mesclar-cancelar">Cancelar</button>'
-        + '<button class="btn-mesclar-confirmar" id="btn-mesclar-confirmar" disabled>'
-        + '<i class="ti ti-git-merge" aria-hidden="true"></i>'
-        + '<span id="mesclar-label">Selecione 2 ou mais</span>'
-        + '</button>'
-        + '</div>'
-        + '</div>';
-
-      let modoMesclar = false;
-      const btnModo        = document.getElementById('btn-modo-mesclar');
-      const lista          = document.getElementById('sugestao-lista');
-      const toolbar        = document.getElementById('mesclar-toolbar');
-      const inputNomeFinal = document.getElementById('input-nome-final');
-      const btnConfirmar   = document.getElementById('btn-mesclar-confirmar');
-      const labelConfirmar = document.getElementById('mesclar-label');
-      const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
-
-      function getSelecionados() {
-        return Array.from(lista.querySelectorAll('.sugestao-item.selecionado')).map((el) => el.dataset.descricao);
-      }
-
-      function atualizarToolbar() {
-        const sel = getSelecionados();
-        const ok  = sel.length >= 2 && inputNomeFinal.value.trim() !== '';
-        btnConfirmar.disabled = !ok;
-        if (sel.length < 2) {
-          labelConfirmar.textContent = 'Selecione ' + (2 - sel.length) + ' mais';
-        } else {
-          labelConfirmar.textContent = 'Mesclar ' + sel.length + ' produtos';
-        }
-        if (sel.length === 1 && !inputNomeFinal.value.trim()) {
-          inputNomeFinal.value = sel[0];
-        }
-      }
-
-      function ativarModo(ativo) {
-        modoMesclar = ativo;
-        lista.classList.toggle('modo-mesclar', ativo);
-        toolbar.classList.toggle('ativa', ativo);
-        btnModo.classList.toggle('ativo', ativo);
-        btnModo.innerHTML = ativo
-          ? '<i class="ti ti-x" aria-hidden="true"></i> Cancelar'
-          : '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
-        if (!ativo) {
-          lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
-          inputNomeFinal.value = '';
-          btnConfirmar.disabled = true;
-          labelConfirmar.textContent = 'Selecione 2 ou mais';
-        }
-      }
-
-      btnModo.addEventListener('click', () => ativarModo(!modoMesclar));
-      btnCancelar.addEventListener('click', () => ativarModo(false));
-      inputNomeFinal.addEventListener('input', atualizarToolbar);
-
-      lista.addEventListener('click', (e) => {
-        const item = e.target.closest('.sugestao-item');
-        if (!item) return;
-        if (modoMesclar) {
-          item.classList.toggle('selecionado');
-          atualizarToolbar();
-        } else {
-          buscarProduto(item.dataset.descricao);
-        }
-      });
-
-      btnConfirmar.addEventListener('click', async () => {
-        const descricoes = getSelecionados();
-        const nome_final = inputNomeFinal.value.trim();
-        if (descricoes.length < 2 || !nome_final) return;
-
-        btnConfirmar.disabled = true;
-        labelConfirmar.textContent = 'Mesclando...';
-
-        try {
-          const data = await apiPost('/mesclar-produtos', { descricoes, nome_final });
-          buscarResult.innerHTML = ''
-            + '<div class="alert" style="background:var(--accent-bg);color:var(--accent-text);margin-bottom:8px;">'
-            + '<i class="ti ti-check" aria-hidden="true"></i> <strong>' + data.nome_final + '</strong>'
-            + ' criado — ' + data.produtos_mesclados + ' produtos mesclados em ' + data.notas_atualizadas + ' nota(s).'
-            + '</div>'
-            + '<button class="btn full" id="btn-desfazer" style="margin-bottom:8px;color:var(--danger);border-color:var(--danger);">'
-            + '<i class="ti ti-arrow-back-up" aria-hidden="true"></i> Desfazer mesclagem'
-            + '</button>'
-            + '<button class="btn-voltar-busca" id="btn-voltar-sugestoes">'
-            + '<i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados'
-            + '</button>';
-
-          const mergeId = data.merge_id;
-          document.getElementById('btn-desfazer').addEventListener('click', async () => {
-            if (!confirm('Desfazer esta mesclagem e restaurar os nomes originais?')) return;
-            try {
-              await apiDelete('/mesclar-produtos', { id: mergeId });
-              buscarResult.innerHTML = '<div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">'
-                + '<i class="ti ti-check" aria-hidden="true"></i> Mesclagem desfeita com sucesso!</div>'
-                + '<button class="btn-voltar-busca" onclick="buscarProduto()">'
-                + '<i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados</button>';
-            } catch (err) {
-              buscarResult.prepend(Object.assign(document.createElement('div'), { innerHTML: alertHtml(err.message) }));
-            }
-          });
-          document.getElementById('btn-voltar-sugestoes').addEventListener('click', () => buscarProduto());
-        } catch (err) {
-          buscarResult.innerHTML = alertHtml(err.message);
-        }
-      });
     }
 
     async function mostrarHistoricoProduto(termoProduto) {
@@ -1248,58 +1238,47 @@
         }
 
         const ultima = data.ultima_compra;
-        const menor  = data.menor_preco;
+        const menor = data.menor_preco;
         const mesmaCompra = ultima.local === menor.local &&
           (ultima.preco_unitario ?? ultima.valor_total) === (menor.preco_unitario ?? menor.valor_total);
 
-        const historicoHtml = data.historico.map((h) => {
-          const unitario = h.preco_unitario
-            ? '<br><span style="font-size:11px;color:var(--text-secondary);">' + formatPrecoUnitario(h.preco_unitario, h.unidade) + '</span>'
-            : '';
-          return '<div class="result-row">'
-            + '<div class="info">'
-            + '<p>' + (h.local || 'Local desconhecido') + '</p>'
-            + '<p>' + formatData(h.data_compra) + ' • qtd: ' + (h.quantidade || '?') + ' • ' + (h.uf || '') + '</p>'
-            + '</div>'
-            + '<div class="value" style="text-align:right;">'
-            + '<span>' + formatValor(h.valor_total) + '</span>'
-            + unitario
-            + '</div>'
-            + '</div>';
-        }).join('');
+        const historicoHtml = data.historico.map((h) => `
+          <div class="result-row">
+            <div class="info">
+              <p>${h.local || 'Local desconhecido'}</p>
+              <p>${formatData(h.data_compra)} • qtd: ${h.quantidade || '?'} • ${h.uf || ''}</p>
+            </div>
+            <div class="value" style="text-align:right;">
+              <span>${formatValor(h.valor_total)}</span>
+              ${h.preco_unitario ? `<br><span style="font-size:11px;color:var(--text-secondary);">${formatPrecoUnitario(h.preco_unitario, h.unidade)}</span>` : ''}
+            </div>
+          </div>
+        `).join('');
 
         const comparacaoHtml = renderComparacao(dataComp);
 
-        const ultimaUnitario = ultima.preco_unitario
-          ? '<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">' + formatPrecoUnitario(ultima.preco_unitario, ultima.unidade) + '</p>'
-          : '';
-        const menorUnitario = menor.preco_unitario
-          ? '<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">' + formatPrecoUnitario(menor.preco_unitario, menor.unidade) + '</p>'
-          : '';
-
-        buscarResult.innerHTML = ''
-          + '<button class="btn-voltar-busca" id="btn-voltar-hist">'
-          + '<i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados'
-          + '</button>'
-          + '<div class="summary-grid">'
-          + '<div class="metric">'
-          + '<p class="label"><i class="ti ti-clock" style="font-size:14px;margin-right:4px;" aria-hidden="true"></i>Última compra</p>'
-          + '<p class="value">' + formatValor(ultima.valor_total) + '</p>'
-          + ultimaUnitario
-          + '<span class="badge last">' + ultima.local + '</span>'
-          + '</div>'
-          + '<div class="metric">'
-          + '<p class="label"><i class="ti ti-tag" style="font-size:14px;margin-right:4px;" aria-hidden="true"></i>Melhor preço/un</p>'
-          + '<p class="value">' + formatValor(menor.valor_total) + '</p>'
-          + menorUnitario
-          + '<span class="badge best">' + (mesmaCompra ? 'Mesmo local' : menor.local) + '</span>'
-          + '</div>'
-          + '</div>'
-          + comparacaoHtml
-          + '<h2 style="font-size:14px;margin-bottom:8px;margin-top:1.5rem;">Histórico de preços — ' + data.produto + '</h2>'
-          + '<div class="item-list">' + historicoHtml + '</div>';
-
-        document.getElementById('btn-voltar-hist').addEventListener('click', () => buscarProduto());
+        buscarResult.innerHTML = `
+          <button class="btn-voltar-busca" onclick="buscarProduto()">
+            <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
+          </button>
+          <div class="summary-grid">
+            <div class="metric">
+              <p class="label"><i class="ti ti-clock" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Última compra</p>
+              <p class="value">${formatValor(ultima.valor_total)}</p>
+              ${ultima.preco_unitario ? `<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">${formatPrecoUnitario(ultima.preco_unitario, ultima.unidade)}</p>` : ''}
+              <span class="badge last">${ultima.local}</span>
+            </div>
+            <div class="metric">
+              <p class="label"><i class="ti ti-tag" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Melhor preço/un</p>
+              <p class="value">${formatValor(menor.valor_total)}</p>
+              ${menor.preco_unitario ? `<p style="font-size:11px;color:var(--text-secondary);margin:2px 0 0;">${formatPrecoUnitario(menor.preco_unitario, menor.unidade)}</p>` : ''}
+              <span class="badge best">${mesmaCompra ? 'Mesmo local' : menor.local}</span>
+            </div>
+          </div>
+          ${comparacaoHtml}
+          <h2 style="font-size:14px; margin-bottom: 8px; margin-top: 1.5rem;">Histórico de preços — ${data.produto}</h2>
+          <div class="item-list">${historicoHtml}</div>
+        `;
       } catch (err) {
         buscarResult.innerHTML = alertHtml(err.message);
       }
@@ -1336,6 +1315,135 @@
       `;
     }
 
+
+    function renderSugestoes(sugestoes, termo) {
+      const sugestoesHtml = sugestoes.map((s) => `
+        <div class="sugestao-item" data-descricao="${s.descricao.replace(/"/g, '&quot;')}">
+          <div class="sug-check"><i class="ti ti-check" aria-hidden="true"></i></div>
+          <div style="flex:1; min-width:0;">
+            <p class="sug-nome">${s.descricao}</p>
+            <p class="sug-meta">${s.vezes} compra${s.vezes !== 1 ? 's' : ''} registrada${s.vezes !== 1 ? 's' : ''}</p>
+          </div>
+          <div class="sug-preco">
+            ${s.menor_preco_unitario
+              ? formatPrecoUnitario(s.menor_preco_unitario)
+              : formatValor(s.ultimo_valor)}
+          </div>
+        </div>
+      `).join('');
+
+      buscarResult.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <p class="sugestao-titulo" style="margin:0;">Encontrei <strong>${sugestoes.length}</strong> produto${sugestoes.length !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
+          <button class="btn-modo-mesclar" id="btn-modo-mesclar">
+            <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
+          </button>
+        </div>
+        <div class="sugestao-lista" id="sugestao-lista">${sugestoesHtml}</div>
+        <div class="mesclar-toolbar" id="mesclar-toolbar">
+          <label>Nome final do produto mesclado:</label>
+          <input type="text" id="input-nome-final" placeholder="ex: LEITE CAMPONESA 1L INTEGRAL" />
+          <div class="mesclar-acoes">
+            <button class="btn-mesclar-cancelar" id="btn-mesclar-cancelar">Cancelar</button>
+            <button class="btn-mesclar-confirmar" id="btn-mesclar-confirmar" disabled>
+              <i class="ti ti-git-merge" aria-hidden="true"></i>
+              <span id="mesclar-confirmar-label">Selecione 2 ou mais</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      // Modo mesclar toggle
+      let modoMesclar = false;
+      const btnModo = document.getElementById('btn-modo-mesclar');
+      const lista   = document.getElementById('sugestao-lista');
+      const toolbar = document.getElementById('mesclar-toolbar');
+      const inputNomeFinal = document.getElementById('input-nome-final');
+      const btnConfirmar   = document.getElementById('btn-mesclar-confirmar');
+      const labelConfirmar = document.getElementById('mesclar-confirmar-label');
+      const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
+
+      function getSelecionados() {
+        return [...lista.querySelectorAll('.sugestao-item.selecionado')]
+          .map((el) => el.dataset.descricao);
+      }
+
+      function atualizarToolbar() {
+        const sel = getSelecionados();
+        const ok  = sel.length >= 2 && inputNomeFinal.value.trim() !== '';
+        btnConfirmar.disabled = !ok;
+        labelConfirmar.textContent = sel.length < 2
+          ? `Selecione ${2 - sel.length} mais`
+          : `Mesclar ${sel.length} produtos`;
+        // Pre-fill nome com o mais comprado se só 1 selecionado
+        if (sel.length === 1 && !inputNomeFinal.value.trim()) {
+          inputNomeFinal.value = sel[0];
+        }
+      }
+
+      btnModo.addEventListener('click', () => {
+        modoMesclar = !modoMesclar;
+        lista.classList.toggle('modo-mesclar', modoMesclar);
+        toolbar.classList.toggle('ativa', modoMesclar);
+        btnModo.classList.toggle('ativo', modoMesclar);
+        btnModo.innerHTML = modoMesclar
+          ? '<i class="ti ti-x" aria-hidden="true"></i> Cancelar'
+          : '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+        if (!modoMesclar) {
+          lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+          inputNomeFinal.value = '';
+          btnConfirmar.disabled = true;
+        }
+      });
+
+      lista.addEventListener('click', (e) => {
+        const item = e.target.closest('.sugestao-item');
+        if (!item) return;
+        if (modoMesclar) {
+          item.classList.toggle('selecionado');
+          atualizarToolbar();
+        } else {
+          buscarProduto(item.dataset.descricao);
+        }
+      });
+
+      inputNomeFinal.addEventListener('input', atualizarToolbar);
+
+      btnCancelar.addEventListener('click', () => {
+        modoMesclar = false;
+        lista.classList.remove('modo-mesclar');
+        toolbar.classList.remove('ativa');
+        btnModo.classList.remove('ativo');
+        btnModo.innerHTML = '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+        lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+        inputNomeFinal.value = '';
+        btnConfirmar.disabled = true;
+      });
+
+      btnConfirmar.addEventListener('click', async () => {
+        const descricoes  = getSelecionados();
+        const nome_final  = inputNomeFinal.value.trim();
+        if (descricoes.length < 2 || !nome_final) return;
+
+        btnConfirmar.disabled = true;
+        labelConfirmar.textContent = 'Mesclando...';
+
+        try {
+          const data = await apiPost('/mesclar-produtos', { descricoes, nome_final });
+          buscarResult.innerHTML = `
+            <div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">
+              <i class="ti ti-check" aria-hidden="true"></i>
+              <strong>${data.nome_final}</strong> criado — ${data.produtos_mesclados} produtos mesclados em ${data.notas_atualizadas} nota(s).
+            </div>
+            <button class="btn-voltar-busca" onclick="buscarProduto()">
+              <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
+            </button>
+          `;
+        } catch (err) {
+          buscarResult.innerHTML = alertHtml(err.message);
+        }
+      });
+    }
     // ---------- Aba: Itens recorrentes ----------
     const btnRecorrentes = document.getElementById('btn-carregar-recorrentes');
     const recorrentesResult = document.getElementById('recorrentes-result');
@@ -1359,7 +1467,7 @@
         const itemsHtml = data.itens_recorrentes.map((item) => {
           const mesmoLocal = item.ultima_compra.local === item.menor_preco.local;
           return `
-            <div class="item-card" onclick="document.getElementById('input-produto').value='${(item.descricao || '').replace(/'/g, "")}'; document.querySelector('[data-tab=buscar]').click(); buscarProduto();">
+            <div class="item-card" onclick="document.getElementById('input-produto').value='${(item.descricao || '').replace(/'/g, "")}'; document.querySelector('[data-tab=buscar]').click(); buscarProduto(${JSON.stringify(item.descricao || '')});">
               <div class="top-row">
                 <p>${item.descricao || 'Item'}</p>
                 <span>${item.vezes_comprado}x comprado</span>
@@ -1381,62 +1489,6 @@
         `;
       } catch (err) {
         recorrentesResult.innerHTML = alertHtml(err.message);
-      }
-    }
-
-
-    // ---------- Aba: Mesclagens ----------
-    const btnMesclagens    = document.getElementById('btn-carregar-mesclagens');
-    const mesclagensResult = document.getElementById('mesclagens-result');
-    btnMesclagens.addEventListener('click', carregarMesclagens);
-
-    async function carregarMesclagens() {
-      mesclagensResult.innerHTML = loadingHtml('Carregando...');
-      try {
-        const data = await apiGet('/mesclar-produtos');
-        if (!data.historico || data.historico.length === 0) {
-          mesclagensResult.innerHTML = emptyHtml('ti-git-merge', 'Nenhuma mesclagem registrada ainda.');
-          return;
-        }
-
-        const cards = data.historico.map((m) => {
-          const originais = (m.descricoes_originais || []).join(', ');
-          const data_str  = new Date(m.createdAt).toLocaleString('pt-BR');
-          return '<div class="merge-log-card" id="merge-' + m._id + '">'
-            + '<div class="merge-log-header">'
-            + '<div>'
-            + '<p class="merge-log-nome">' + m.nome_final + '</p>'
-            + '<p class="merge-log-de">Mesclou: ' + originais + '</p>'
-            + '<p class="merge-log-de">' + data_str + ' • ' + m.notas_atualizadas + ' nota(s)</p>'
-            + '</div>'
-            + '<button class="btn-reverter" data-id="' + m._id + '" data-nome="' + m.nome_final.replace(/"/g, '&quot;') + '">'
-            + '<i class="ti ti-arrow-back-up" aria-hidden="true"></i> Reverter'
-            + '</button>'
-            + '</div>'
-            + '</div>';
-        }).join('');
-
-        mesclagensResult.innerHTML = '<div class="item-list">' + cards + '</div>';
-
-        mesclagensResult.addEventListener('click', async (e) => {
-          const btn = e.target.closest('.btn-reverter');
-          if (!btn) return;
-          const id   = btn.dataset.id;
-          const nome = btn.dataset.nome;
-          if (!confirm('Reverter a mesclagem de "' + nome + '"? Os produtos voltarão aos nomes originais.')) return;
-          btn.innerHTML = 'Revertendo...';
-          btn.disabled  = true;
-          try {
-            await apiDelete('/mesclar-produtos', { id });
-            const card = document.getElementById('merge-' + id);
-            if (card) { card.style.transition = 'opacity .3s'; card.style.opacity = '0'; setTimeout(() => card.remove(), 300); }
-          } catch (err) {
-            btn.innerHTML = 'Erro';
-            mesclagensResult.insertAdjacentHTML('afterbegin', alertHtml(err.message));
-          }
-        });
-      } catch (err) {
-        mesclagensResult.innerHTML = alertHtml(err.message);
       }
     }
 

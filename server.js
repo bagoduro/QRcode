@@ -641,64 +641,6 @@ app.delete('/historico-compras', async (req, res) => {
   }
 });
 
-
-// GET /mesclar-produtos — histórico de mesclagens
-app.get('/mesclar-produtos', async (req, res) => {
-  try {
-    const db = await getDb();
-    const mergeLog = db.collection('merge_log');
-    const historico = await mergeLog.find({}).sort({ createdAt: -1 }).limit(50).toArray();
-    return res.json({ total: historico.length, historico });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /mesclar-produtos?id=... — reverter mesclagem
-app.delete('/mesclar-produtos', async (req, res) => {
-  const { id } = req.query;
-  if (!id) return res.status(400).json({ error: 'Informe o "id".' });
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import('mongodb');
-    const oid = new ObjectId(id);
-    const purchases = db.collection('purchases');
-    const products  = db.collection('products');
-    const mergeLog  = db.collection('merge_log');
-
-    const entrada = await mergeLog.findOne({ _id: oid });
-    if (!entrada) return res.status(404).json({ error: 'Mesclagem não encontrada.' });
-
-    let notasRevertidas = 0;
-    for (const snap of entrada.snapshot) {
-      for (const itemSnap of snap.itens) {
-        const result = await purchases.updateOne(
-          { _id: snap.purchaseId },
-          { $set: {
-            [`itens.${itemSnap.idx}.descricao`]: itemSnap.descricao,
-            [`itens.${itemSnap.idx}.descricao_normalizada`]: itemSnap.descricao_normalizada,
-            [`itens.${itemSnap.idx}.product_id`]: itemSnap.product_id,
-          }}
-        );
-        if (result.modifiedCount > 0) notasRevertidas++;
-      }
-    }
-
-    for (const prod of entrada.produtos_antigos) {
-      await products.updateOne({ nome_normalizado: prod.nome_normalizado }, { $setOnInsert: prod }, { upsert: true });
-    }
-
-    if (!entrada.nome_final_preexistia) {
-      const nomeFinalNorm = entrada.nome_final.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-      await products.deleteOne({ nome_normalizado: nomeFinalNorm });
-    }
-
-    await mergeLog.deleteOne({ _id: oid });
-    return res.json({ ok: true, notas_revertidas: notasRevertidas });
-  } catch (err) {
-    return res.status(500).json({ error: err.message });
-  }
-});
 app.listen(port, () => {
   console.log(`Backend NFC-e rodando em http://localhost:${port}`);
   console.log('[Startup] Variáveis de ambiente:');
