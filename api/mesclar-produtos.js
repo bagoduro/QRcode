@@ -1,62 +1,128 @@
 import { getDb } from '../db.js';
 
+function normalizeName(text = '') {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Use POST /api/mesclar-produtos' });
-  }
-
-  const { descricoes, nome_final } = req.body || {};
-
-  if (!Array.isArray(descricoes) || descricoes.length < 2) {
-    return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
-  }
-  if (!nome_final || !nome_final.trim()) {
-    return res.status(400).json({ error: 'Informe o "nome_final" para o produto mesclado.' });
-  }
 
   try {
-    const db = await getDb();
+    const db       = await getDb();
     const purchases = db.collection('purchases');
     const products  = db.collection('products');
+    const mergeLog  = db.collection('merge_log');
 
-    const nomeFinal = nome_final.trim();
-    const nomeFinalNorm = nomeFinal
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
+    // ── GET: histórico de mesclagens ─────────────────────────────────────────
+    if (req.method === 'GET') {
+      const historico = await mergeLog.find({}).sort({ createdAt: -1 }).limit(50).toArray();
+      return res.json({ total: historico.length, historico });
+    }
 
-    // Upsert produto canônico na coleção products
+    // ── DELETE: reverter mesclagem ────────────────────────────────────────────
+    if (req.method === 'DELETE') {
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Informe o "id" da mesclagem.' });
+
+      const { ObjectId } = await import('mongodb');
+      let oid;
+      try { oid = new ObjectId(id); } catch { return res.status(400).json({ error: 'ID inválido.' }); }
+
+      const entrada = await mergeLog.findOne({ _id: oid });
+      if (!entrada) return res.status(404).json({ error: 'Mesclagem não encontrada.' });
+
+      // Restaurar cada item usando o snapshot
+      let notasRevertidas = 0;
+      for (const snap of entrada.snapshot) {
+        for (const itemSnap of snap.itens) {
+          const result = await purchases.updateOne(
+            { _id: snap.purchaseId },
+            {
+              $set: {
+                [`itens.${itemSnap.idx}.descricao`]:             itemSnap.descricao,
+                [`itens.${itemSnap.idx}.descricao_normalizada`]: itemSnap.descricao_normalizada,
+                [`itens.${itemSnap.idx}.product_id`]:            itemSnap.product_id,
+              },
+            }
+          );
+          if (result.modifiedCount > 0) notasRevertidas++;
+        }
+      }
+
+      // Recriar produtos antigos na coleção products
+      for (const prod of entrada.produtos_antigos) {
+        await products.updateOne(
+          { nome_normalizado: prod.nome_normalizado },
+          { $setOnInsert: prod },
+          { upsert: true }
+        );
+      }
+
+      // Remover produto canônico se não existia antes
+      if (!entrada.nome_final_preexistia) {
+        await products.deleteOne({ nome_normalizado: normalizeName(entrada.nome_final) });
+      }
+
+      await mergeLog.deleteOne({ _id: oid });
+      return res.json({ ok: true, notas_revertidas: notasRevertidas });
+    }
+
+    // ── POST: executar mesclagem ──────────────────────────────────────────────
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+
+    const { descricoes, nome_final } = req.body || {};
+    if (!Array.isArray(descricoes) || descricoes.length < 2)
+      return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
+    if (!nome_final || !nome_final.trim())
+      return res.status(400).json({ error: 'Informe o "nome_final".' });
+
+    const nomeFinal     = nome_final.trim();
+    const nomeFinalNorm = normalizeName(nomeFinal);
+
+    // Verificar se o nome final já existia
+    const nomeFinalPreexistia = !!(await products.findOne({ nome_normalizado: nomeFinalNorm }));
+
+    // Snapshot dos produtos antigos (para recriar ao reverter)
+    const produtosAntigos = await products.find({
+      nome_normalizado: { $in: descricoes.map(normalizeName).filter((n) => n !== nomeFinalNorm) },
+    }).toArray();
+
+    // Snapshot dos itens afetados nas purchases (para restaurar nomes ao reverter)
+    const snapshot = [];
+    for (const descricao of descricoes) {
+      const comprasAfetadas = await purchases.find({ 'itens.descricao': descricao }).toArray();
+      for (const compra of comprasAfetadas) {
+        const itensSnap = compra.itens
+          .map((item, idx) => ({ idx, descricao: item.descricao, descricao_normalizada: item.descricao_normalizada, product_id: item.product_id }))
+          .filter((item) => item.descricao === descricao);
+        if (itensSnap.length > 0) snapshot.push({ purchaseId: compra._id, itens: itensSnap });
+      }
+    }
+
+    // Upsert produto canônico
     await products.updateOne(
       { nome_normalizado: nomeFinalNorm },
       {
         $setOnInsert: { createdAt: new Date(), codigo: null },
-        $set: {
-          nome_original: nomeFinal,
-          nome_normalizado: nomeFinalNorm,
-          updatedAt: new Date(),
-        },
+        $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() },
       },
       { upsert: true }
     );
     const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
 
-    // Atualizar todos os itens nas purchases que tenham qualquer uma das descricoes
+    // Atualizar itens nas purchases
     let totalAtualizados = 0;
     for (const descricao of descricoes) {
       const result = await purchases.updateMany(
         { 'itens.descricao': descricao },
         {
           $set: {
-            'itens.$[elem].descricao':            nomeFinal,
+            'itens.$[elem].descricao':             nomeFinal,
             'itens.$[elem].descricao_normalizada': nomeFinalNorm,
-            'itens.$[elem].product_id':           produtoCanonico._id,
+            'itens.$[elem].product_id':            produtoCanonico._id,
           },
         },
         { arrayFilters: [{ 'elem.descricao': descricao }] }
@@ -64,29 +130,31 @@ export default async function handler(req, res) {
       totalAtualizados += result.modifiedCount;
     }
 
-    // Remover produtos antigos da coleção products (exceto o canônico)
-    const descNormsAntigas = descricoes
-      .map((d) =>
-        d.normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/\s+/g, ' ')
-          .trim()
-      )
-      .filter((n) => n !== nomeFinalNorm);
+    // Deletar produtos antigos
+    const descNormsAntigas = descricoes.map(normalizeName).filter((n) => n !== nomeFinalNorm);
+    await products.deleteMany({ nome_normalizado: { $in: descNormsAntigas } });
 
-    await products.deleteMany({
-      nome_normalizado: { $in: descNormsAntigas },
+    // Salvar no merge_log
+    const logEntry = await mergeLog.insertOne({
+      createdAt:             new Date(),
+      nome_final:            nomeFinal,
+      descricoes_originais:  descricoes,
+      notas_atualizadas:     totalAtualizados,
+      nome_final_preexistia: nomeFinalPreexistia,
+      produtos_antigos:      produtosAntigos,
+      snapshot,
     });
 
     return res.json({
       ok: true,
-      nome_final: nomeFinal,
+      merge_id:           logEntry.insertedId,
+      nome_final:         nomeFinal,
       produtos_mesclados: descricoes.length,
-      notas_atualizadas: totalAtualizados,
+      notas_atualizadas:  totalAtualizados,
     });
+
   } catch (err) {
-    console.error('[POST /api/mesclar-produtos] Erro:', err.message, err.stack);
+    console.error('[mesclar-produtos] Erro:', err.message, err.stack);
     return res.status(500).json({ error: err.message });
   }
 }
