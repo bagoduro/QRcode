@@ -1184,7 +1184,7 @@
     const btnBuscarProduto = document.getElementById('btn-buscar-produto');
     const buscarResult = document.getElementById('buscar-result');
 
-    btnBuscarProduto.addEventListener('click', buscarProduto);
+    btnBuscarProduto.addEventListener('click', () => buscarProduto());
 
 
     inputProduto.addEventListener('keydown', (e) => {
