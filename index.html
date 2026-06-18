@@ -473,6 +473,7 @@
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
 
     .alert {
       background: var(--danger-bg);
@@ -1292,15 +1293,20 @@
         }
 
         btnDesfazerHist.addEventListener('click', async () => {
-          if (!confirm(`Deseja desfazer a mesclagem de "${termoProduto}"? Os itens voltarão aos seus nomes originais.`)) return;
           btnDesfazerHist.disabled = true;
+          btnDesfazerHist.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> Desfazendo...';
           try {
             const res = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: termoProduto });
-            alert(`Sucesso! ${res.itens_restaurados} itens restaurados.`);
-            buscarProduto(termoProduto); // Recarrega a busca
+            // Feedback visual rápido antes de recarregar
+            btnDesfazerHist.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Pronto!';
+            setTimeout(() => buscarProduto(termoProduto), 800);
           } catch (err) {
-            alert("Erro ao desfazer: " + err.message);
-            btnDesfazerHist.disabled = false;
+            btnDesfazerHist.innerHTML = '<i class="ti ti-alert-circle" aria-hidden="true"></i> Erro';
+            console.error(err);
+            setTimeout(() => {
+              btnDesfazerHist.disabled = false;
+              btnDesfazerHist.innerHTML = '<i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer Mesclagem';
+            }, 2000);
           }
         });
       } catch (err) {
@@ -1401,23 +1407,22 @@
       }
 
       btnDesfazer.addEventListener('click', async () => {
-        if (!confirm(`Deseja desfazer a mesclagem de "${termo}"? Os itens voltarão aos seus nomes originais.`)) return;
-        
         btnDesfazer.disabled = true;
+        btnDesfazer.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> Desfazendo...';
+        
         try {
           const data = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: termo });
           buscarResult.innerHTML = `
             <div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">
               <i class="ti ti-check" aria-hidden="true"></i>
-              Mesclagem de "<strong>${termo}</strong>" desfeita. ${data.itens_restaurados} itens restaurados para: ${data.originais_recuperados.join(', ')}.
+              Mesclagem de "<strong>${termo}</strong>" desfeita. ${data.itens_restaurados} itens restaurados.
             </div>
             <button class="btn-voltar-busca" onclick="buscarProduto()">
               <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
             </button>
           `;
         } catch (err) {
-          alert("Não foi possível desfazer a mesclagem: " + err.message);
-          btnDesfazer.disabled = false;
+          buscarResult.innerHTML = alertHtml("Não foi possível desfazer: " + err.message);
         }
       });
 
