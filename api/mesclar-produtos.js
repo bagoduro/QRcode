@@ -14,8 +14,13 @@ export default async function handler(req, res) {
 
   try {
     const db = await getDb();
-    const purchases = db.collection('purchases');
-    const products  = db.collection('products');
+    const purchases    = db.collection('purchases');
+    const products     = db.collection('products');
+    const mergeRules   = db.collection('merge_rules');
+
+    // Utilitário de normalização
+    const norm = (text = '') =>
+      text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
     // --- LÓGICA PARA DESFAZER MESCLAGEM ---
     if (action === 'unmerge') {
@@ -48,12 +53,7 @@ export default async function handler(req, res) {
       let totalRestaurados = 0;
 
       for (const descOriginal of descricoesOriginais) {
-        const descNorm = descOriginal
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/\s+/g, ' ')
-          .trim();
+        const descNorm = norm(descOriginal);
 
         await products.updateOne(
           { nome_normalizado: descNorm },
@@ -89,6 +89,10 @@ export default async function handler(req, res) {
         totalRestaurados += updateResult.modifiedCount;
       }
 
+      // Remove as regras de auto-merge referentes a esta mesclagem
+      const nomeFinalNormUnmerge = norm(descricao_mesclada);
+      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNormUnmerge });
+
       return res.json({
         ok: true,
         mensagem: 'Mesclagem desfeita com sucesso.',
@@ -105,13 +109,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Informe o "nome_final" para o produto mesclado.' });
     }
 
-    const nomeFinal = nome_final.trim();
-    const nomeFinalNorm = nomeFinal
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
+    const nomeFinal     = nome_final.trim();
+    const nomeFinalNorm = norm(nomeFinal);
 
     await products.updateOne(
       { nome_normalizado: nomeFinalNorm },
@@ -152,24 +151,43 @@ export default async function handler(req, res) {
     }
 
     const descNormsAntigas = descricoes
-      .map((d) =>
-        d.normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/\s+/g, ' ')
-          .trim()
-      )
+      .map((d) => norm(d))
       .filter((n) => n !== nomeFinalNorm);
 
     await products.deleteMany({
       nome_normalizado: { $in: descNormsAntigas },
     });
 
+    // ── SALVAR REGRAS DE AUTO-MERGE ──────────────────────────────────────────
+    // Para cada descrição original (exceto o próprio nome final), persistimos
+    // uma regra: "se aparecer X numa nota nova → renomear para nomeFinal"
+    const descricoesSemFinal = descricoes.filter((d) => norm(d) !== nomeFinalNorm);
+    for (const descOriginal of descricoesSemFinal) {
+      const descOrigNorm = norm(descOriginal);
+      await mergeRules.updateOne(
+        { descricao_original_normalizada: descOrigNorm },
+        {
+          $set: {
+            descricao_original:           descOriginal,
+            descricao_original_normalizada: descOrigNorm,
+            nome_final:                   nomeFinal,
+            nome_final_normalizado:       nomeFinalNorm,
+            product_id:                   produtoCanonico._id,
+            updatedAt:                    new Date(),
+          },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true }
+      );
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     return res.json({
       ok: true,
       nome_final: nomeFinal,
       produtos_mesclados: descricoes.length,
       notas_atualizadas: totalAtualizados,
+      regras_salvas: descricoesSemFinal.length,
     });
 
   } catch (err) {

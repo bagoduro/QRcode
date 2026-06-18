@@ -41,8 +41,19 @@ export default async function handler(req, res) {
 
   try {
     const db = await getDb();
-    const purchases = db.collection('purchases');
-    const products  = db.collection('products');
+    const purchases  = db.collection('purchases');
+    const products   = db.collection('products');
+    const mergeRules = db.collection('merge_rules');
+
+    // Garante índice único na coleção de regras de auto-merge
+    await mergeRules.createIndex(
+      { descricao_original_normalizada: 1 },
+      { unique: true, name: 'idx_merge_rules_orig_norm' }
+    );
+    await mergeRules.createIndex(
+      { nome_final_normalizado: 1 },
+      { name: 'idx_merge_rules_final_norm' }
+    );
 
     const todasCompras = await purchases.find({}).toArray();
 

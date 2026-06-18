@@ -48,7 +48,8 @@ const savePurchase = async (url, resultado) => {
     console.log('[savePurchase] Iniciando salvamento...', { url });
     const db = await getDb();
     console.log('[savePurchase] Conectado ao banco');
-    const purchases = db.collection('purchases');
+    const purchases   = db.collection('purchases');
+    const mergeRules  = db.collection('merge_rules');
 
     const existing = await purchases.findOne({ url });
     if (existing) {
@@ -56,12 +57,34 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
+    // Carrega todas as regras de mesclagem em memória (coleção pequena)
+    const rules = await mergeRules.find({}).toArray();
+    // Monta mapa: descricao_original_normalizada → regra
+    const rulesMap = new Map(rules.map((r) => [r.descricao_original_normalizada, r]));
+
     const itensEnriquecidos = await Promise.all(
       resultado.itens.map(async (item) => {
+        const nomeNorm = normalizeProductName(item.descricao);
+        const rule     = rulesMap.get(nomeNorm);
+
+        if (rule) {
+          // ── AUTO-MERGE: produto conhecido com regra de mesclagem ──────────
+          console.log(`[savePurchase] Auto-merge: "${item.descricao}" → "${rule.nome_final}"`);
+          return {
+            ...item,
+            descricao_original:       item.descricao,        // preserva o original
+            descricao:                rule.nome_final,        // aplica o nome mesclado
+            descricao_normalizada:    rule.nome_final_normalizado,
+            product_id:               rule.product_id,
+          };
+          // ─────────────────────────────────────────────────────────────────
+        }
+
+        // Fluxo padrão: upsert normal
         const productId = await upsertProduct(db, item);
         return {
           ...item,
-          descricao_normalizada: normalizeProductName(item.descricao),
+          descricao_normalizada: nomeNorm,
           product_id: productId,
         };
       })
@@ -79,7 +102,9 @@ const savePurchase = async (url, resultado) => {
 
     const result = await purchases.insertOne(purchase);
     console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
-    return { duplicate: false };
+
+    const autoMerged = itensEnriquecidos.filter((i) => i.descricao_original).length;
+    return { duplicate: false, auto_merged: autoMerged };
   } catch (error) {
     console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
     throw error;
@@ -230,7 +255,7 @@ export default async function handler(req, res) {
       return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
     }
 
-    return res.json(resultado);
+    return res.json({ ...resultado, auto_merged: saveResult?.auto_merged ?? 0 });
   } catch (err) {
     console.error(`[${req.method} /api/consulta-qrcode] Erro:`, err.message);
     return res.status(500).json({ error: 'Erro interno', details: err.message });
