@@ -225,6 +225,7 @@ export default async function handler(req, res) {
             unidade: '$itens.unidade',
             valor_total: '$itens.valor_total',
             preco_unitario: '$itens.preco_unitario',
+            descricao_original: '$itens.descricao_original',
           },
         },
         { $sort: { createdAt: -1 } },

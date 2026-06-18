@@ -1258,9 +1258,14 @@
         const comparacaoHtml = renderComparacao(dataComp);
 
         buscarResult.innerHTML = `
-          <button class="btn-voltar-busca" onclick="buscarProduto()">
-            <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar para resultados
-          </button>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <button class="btn-voltar-busca" onclick="buscarProduto()" style="margin:0;">
+              <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
+            </button>
+            <button class="btn-modo-mesclar" id="btn-desfazer-mesclagem-hist" title="Desfazer mesclagem deste produto" style="font-size:12px; height:32px; display:none;">
+              <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer Mesclagem
+            </button>
+          </div>
           <div class="summary-grid">
             <div class="metric">
               <p class="label"><i class="ti ti-clock" style="font-size:14px; margin-right:4px;" aria-hidden="true"></i>Última compra</p>
@@ -1279,6 +1284,25 @@
           <h2 style="font-size:14px; margin-bottom: 8px; margin-top: 1.5rem;">Histórico de preços — ${data.produto}</h2>
           <div class="item-list">${historicoHtml}</div>
         `;
+
+        const btnDesfazerHist = document.getElementById('btn-desfazer-mesclagem-hist');
+        // Mostrar se algum item no histórico tem descricao_original
+        if (data.historico.some(h => h.descricao_original)) {
+          btnDesfazerHist.style.display = 'flex';
+        }
+
+        btnDesfazerHist.addEventListener('click', async () => {
+          if (!confirm(`Deseja desfazer a mesclagem de "${termoProduto}"? Os itens voltarão aos seus nomes originais.`)) return;
+          btnDesfazerHist.disabled = true;
+          try {
+            const res = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: termoProduto });
+            alert(`Sucesso! ${res.itens_restaurados} itens restaurados.`);
+            buscarProduto(termoProduto); // Recarrega a busca
+          } catch (err) {
+            alert("Erro ao desfazer: " + err.message);
+            btnDesfazerHist.disabled = false;
+          }
+        });
       } catch (err) {
         buscarResult.innerHTML = alertHtml(err.message);
       }
@@ -1335,9 +1359,14 @@
       buscarResult.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
           <p class="sugestao-titulo" style="margin:0;">Encontrei <strong>${sugestoes.length}</strong> produto${sugestoes.length !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
-          <button class="btn-modo-mesclar" id="btn-modo-mesclar">
-            <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
-          </button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn-modo-mesclar" id="btn-desfazer-mesclagem" title="Desfazer mesclagem deste produto" style="display:none;">
+              <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer
+            </button>
+            <button class="btn-modo-mesclar" id="btn-modo-mesclar">
+              <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
+            </button>
+          </div>
         </div>
         <div class="sugestao-lista" id="sugestao-lista">${sugestoesHtml}</div>
         <div class="mesclar-toolbar" id="mesclar-toolbar">
@@ -1356,12 +1385,41 @@
       // Modo mesclar toggle
       let modoMesclar = false;
       const btnModo = document.getElementById('btn-modo-mesclar');
+      const btnDesfazer = document.getElementById('btn-desfazer-mesclagem');
       const lista   = document.getElementById('sugestao-lista');
       const toolbar = document.getElementById('mesclar-toolbar');
       const inputNomeFinal = document.getElementById('input-nome-final');
       const btnConfirmar   = document.getElementById('btn-mesclar-confirmar');
       const labelConfirmar = document.getElementById('mesclar-confirmar-label');
       const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
+
+      // Verificar se o termo pesquisado é um produto mesclado para mostrar o botão "Desfazer"
+      if (sugestoes.length === 1 && sugestoes[0].descricao.toLowerCase() === termo.toLowerCase()) {
+         // Se só tem 1 resultado e é exatamente o que foi buscado, pode ser um mesclado
+         // Vamos mostrar o botão e deixar o backend validar se tem 'descricao_original'
+         btnDesfazer.style.display = 'flex';
+      }
+
+      btnDesfazer.addEventListener('click', async () => {
+        if (!confirm(`Deseja desfazer a mesclagem de "${termo}"? Os itens voltarão aos seus nomes originais.`)) return;
+        
+        btnDesfazer.disabled = true;
+        try {
+          const data = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: termo });
+          buscarResult.innerHTML = `
+            <div class="alert" style="background:var(--accent-bg);color:var(--accent-text);">
+              <i class="ti ti-check" aria-hidden="true"></i>
+              Mesclagem de "<strong>${termo}</strong>" desfeita. ${data.itens_restaurados} itens restaurados para: ${data.originais_recuperados.join(', ')}.
+            </div>
+            <button class="btn-voltar-busca" onclick="buscarProduto()">
+              <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
+            </button>
+          `;
+        } catch (err) {
+          alert("Não foi possível desfazer a mesclagem: " + err.message);
+          btnDesfazer.disabled = false;
+        }
+      });
 
       function getSelecionados() {
         return [...lista.querySelectorAll('.sugestao-item.selecionado')]
