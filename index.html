@@ -1481,11 +1481,14 @@
       const labelConfirmar = document.getElementById('mesclar-confirmar-label');
       const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
 
-      // Verificar se o termo pesquisado é um produto mesclado para mostrar o botão "Desfazer"
-      if (sugestoes.length === 1 && sugestoes[0].descricao.toLowerCase() === termo.toLowerCase()) {
-         // Se só tem 1 resultado e é exatamente o que foi buscado, pode ser um mesclado
-         // Vamos mostrar o botão e deixar o backend validar se tem 'descricao_original'
-         btnDesfazer.style.display = 'flex';
+      // Mostrar botão "Desfazer mesclagem" apenas se o produto pesquisado for mesclado
+      const produtoMesclado = sugestoes.find(
+        s => s.descricao.toLowerCase() === termo.toLowerCase() && s.mesclado === true
+      );
+      if (produtoMesclado) {
+        btnDesfazer.style.display = 'flex';
+      } else {
+        btnDesfazer.style.display = 'none';
       }
 
       btnDesfazer.addEventListener('click', async () => {

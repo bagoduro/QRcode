@@ -375,6 +375,14 @@ app.get('/historico-compras', async (req, res) => {
 
     const sugestoesList = await purchases.aggregate(pipeline).toArray();
 
+    // Verifica quais sugestões são produtos mesclados
+    const mergeRules  = db.collection('merge_rules');
+    const normsRetornadas = sugestoesList.map((s) => s._id).filter(Boolean);
+    const regrasAtivas = normsRetornadas.length
+      ? await mergeRules.find({ nome_final_normalizado: { $in: normsRetornadas } }).toArray()
+      : [];
+    const mesclados = new Set(regrasAtivas.map((r) => r.nome_final_normalizado));
+
     return res.json({
       termo: produto,
       total: sugestoesList.length,
@@ -386,6 +394,7 @@ app.get('/historico-compras', async (req, res) => {
         menor_preco_unitario: s.menor_preco_unitario,
         ultimo_valor: s.ultimo_valor,
         ultimo_local: s.ultimo_local,
+        mesclado: mesclados.has(s._id),
       })),
     });
   }
