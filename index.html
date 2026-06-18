@@ -923,7 +923,7 @@
     </header>
 
     <nav class="tabs">
-      <button class="tab-btn active somente-logado" data-tab="leitor"><i class="ti ti-qrcode"></i><span>Ler nota</span></button>
+      <button class="tab-btn active" data-tab="leitor"><i class="ti ti-qrcode"></i><span>Ler nota</span></button>
       <button class="tab-btn" data-tab="buscar"><i class="ti ti-search"></i><span>Buscar item</span></button>
       <button class="tab-btn" data-tab="recorrentes"><i class="ti ti-repeat"></i><span>Recorrentes</span></button>
       <button class="tab-btn" data-tab="historico"><i class="ti ti-receipt"></i><span>Compras</span></button>
@@ -1781,7 +1781,7 @@
       const token = getToken();
       if (!token) { applyAuthState(false); return; }
       try {
-        const res = await fetch('/auth?action=me', {
+        const res = await _origFetch('/api/auth?action=me', {
           headers: { 'Authorization': 'Bearer ' + token }
         });
         const data = await res.json();
@@ -1801,7 +1801,7 @@
     const _origFetch = window.fetch.bind(window);
     window.fetch = function(input, init = {}) {
       const token = getToken();
-      if (token && typeof input === 'string' && input.startsWith('/api')) {
+      if (token && typeof input === 'string' && (input.startsWith('/api') || input.startsWith('/auth'))) {
         init.headers = { ...(init.headers || {}), 'Authorization': 'Bearer ' + token };
       }
       return _origFetch(input, init);
@@ -1865,7 +1865,7 @@
       authSubmitBtn.textContent = 'Aguarde...';
 
       try {
-        const res = await _origFetch('/auth?action=' + authMode, {
+        const res = await _origFetch('/api/auth?action=' + authMode, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
@@ -1892,15 +1892,7 @@
       el.addEventListener('keydown', e => { if (e.key === 'Enter') authSubmitBtn.click(); });
     });
 
-    // ── Interceptar clique na aba "Ler nota" se não estiver logado ───────────
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        if (btn.dataset.tab === 'leitor' && !getToken()) {
-          e.stopImmediatePropagation();
-          openAuthModal('login');
-        }
-      }, true); // capture phase, antes do handler de troca de aba
-    });
+
 
     // ── Inicializa ─────────────────────────────────────────────────────────
     checkAuthOnLoad();

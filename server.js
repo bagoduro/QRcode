@@ -234,7 +234,7 @@ const fetchAndParseUrl = async (url) => {
   return parseHtml(html);
 };
 
-app.post('/consulta-qrcode', requireAuth, async (req, res) => {
+app.post('/consulta-qrcode', async (req, res) => {
   const { url } = req.body;
   console.log('[POST /consulta-qrcode] Requisição recebida:', { url });
   
