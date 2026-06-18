@@ -1481,11 +1481,9 @@
       const labelConfirmar = document.getElementById('mesclar-confirmar-label');
       const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
 
-      // Mostrar botão "Desfazer mesclagem" apenas se o produto pesquisado for mesclado
-      const produtoMesclado = sugestoes.find(
-        s => s.descricao.toLowerCase() === termo.toLowerCase() && s.mesclado === true
-      );
-      if (produtoMesclado) {
+      // Mostrar botão "Desfazer mesclagem" apenas se houver exatamente 1 resultado
+      // e ele for um produto mesclado (campo mesclado=true vindo do backend)
+      if (sugestoes.length === 1 && sugestoes[0].mesclado === true) {
         btnDesfazer.style.display = 'flex';
       } else {
         btnDesfazer.style.display = 'none';
