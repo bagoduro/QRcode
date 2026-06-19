@@ -823,6 +823,7 @@
     .btn-modo-mesclar.ativo { color: var(--accent); border-color: var(--accent); }
 
     /* ── Auth overlay ─────────────────────────────────────────────────────── */
+    /* ── Auth overlay ──────────────────────────────────────────────────────── */
     .auth-overlay {
       position: fixed; inset: 0; z-index: 9999;
       background: var(--bg-primary);
@@ -830,29 +831,120 @@
       padding: 1rem;
     }
     .auth-overlay.hidden { display: none; }
+
     .auth-card {
       background: var(--bg-secondary);
       border: 1px solid var(--border-strong);
       border-radius: var(--radius-lg);
-      padding: 2rem 1.75rem;
-      width: 100%; max-width: 380px;
+      padding: 2.25rem 2rem 2rem;
+      width: 100%; max-width: 400px;
+      box-shadow: 0 4px 24px rgba(0,0,0,.07);
+      position: relative;
     }
-    .auth-card h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+
+    /* Ícone decorativo no topo */
+    .auth-icon {
+      width: 48px; height: 48px;
+      background: var(--accent-bg);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 1.25rem;
+    }
+    .auth-icon i { font-size: 22px; color: var(--accent); }
+
+    .auth-card h2 {
+      margin: 0 0 .3rem;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
     .auth-card .auth-subtitle {
-      color: var(--text-secondary); font-size: .875rem; margin: 0 0 1.5rem;
+      color: var(--text-secondary);
+      font-size: .875rem;
+      margin: 0 0 1.75rem;
+      line-height: 1.5;
     }
-    .auth-field { display: flex; flex-direction: column; gap: .35rem; margin-bottom: 1rem; }
-    .auth-field label { font-size: .8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .04em; }
+
+    .auth-field { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 1rem; }
+    .auth-field label {
+      font-size: .75rem; font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: .06em;
+    }
+    .auth-input-wrap { position: relative; }
+    .auth-input-wrap i {
+      position: absolute; left: .75rem; top: 50%; transform: translateY(-50%);
+      color: var(--text-tertiary, var(--text-secondary)); font-size: 16px;
+      pointer-events: none;
+    }
     .auth-field input {
-      padding: .65rem .75rem; border-radius: var(--radius-md);
-      border: 1px solid var(--border-strong); background: var(--bg-primary);
+      width: 100%; box-sizing: border-box;
+      padding: .7rem .75rem .7rem 2.4rem;
+      border-radius: var(--radius-md);
+      border: 1.5px solid var(--border-strong);
+      background: var(--bg-primary);
       font-size: .95rem; color: var(--text-primary); outline: none;
-      transition: border-color .15s;
+      transition: border-color .15s, box-shadow .15s;
     }
-    .auth-field input:focus { border-color: var(--accent); }
-    .auth-error { color: var(--danger); font-size: .85rem; margin-bottom: .75rem; min-height: 1.2em; }
-    .auth-toggle { font-size: .85rem; color: var(--text-secondary); margin-top: 1rem; text-align: center; }
-    .auth-toggle button { background: none; border: none; color: var(--accent); cursor: pointer; font-size: .85rem; padding: 0; text-decoration: underline; }
+    .auth-field input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+    }
+
+    .auth-submit {
+      width: 100%; margin-top: .5rem;
+      padding: .75rem;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius-md);
+      font-size: .95rem; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: .5rem;
+      transition: opacity .15s, transform .1s;
+    }
+    .auth-submit:hover { opacity: .9; }
+    .auth-submit:active { transform: scale(.98); }
+    .auth-submit:disabled { opacity: .6; cursor: default; }
+
+    .auth-divider {
+      display: flex; align-items: center; gap: .75rem;
+      margin: 1.25rem 0;
+      color: var(--text-secondary); font-size: .75rem;
+    }
+    .auth-divider::before, .auth-divider::after {
+      content: ''; flex: 1; height: 1px; background: var(--border-strong);
+    }
+
+    .auth-toggle {
+      font-size: .875rem; color: var(--text-secondary);
+      text-align: center;
+    }
+    .auth-toggle button {
+      background: none; border: none; color: var(--accent);
+      cursor: pointer; font-size: .875rem; font-weight: 600;
+      padding: 0; text-decoration: none;
+    }
+    .auth-toggle button:hover { text-decoration: underline; }
+
+    .auth-error {
+      display: flex; align-items: center; gap: .5rem;
+      color: var(--danger); font-size: .85rem;
+      background: color-mix(in srgb, var(--danger) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+      border-radius: var(--radius-md);
+      padding: .6rem .75rem;
+      margin-bottom: 1rem;
+      min-height: 0;
+    }
+    .auth-error:empty { display: none; }
+
+    /* Botão voltar dentro do card */
+    .auth-back {
+      display: flex; align-items: center; gap: .35rem;
+      background: none; border: none; cursor: pointer;
+      color: var(--text-secondary); font-size: .8rem;
+      padding: 0; margin-bottom: 1.5rem;
+      transition: color .15s;
+    }
+    .auth-back:hover { color: var(--text-primary); }
 
     /* ── Elementos só visíveis para logados ─────────────────────────────── */
     .somente-logado { display: none !important; }
@@ -882,22 +974,55 @@
   <!-- ── Auth overlay ──────────────────────────────────────────────────────── -->
   <div class="auth-overlay hidden" id="auth-overlay">
     <div class="auth-card">
-      <h2 id="auth-title">Entrar</h2>
-      <p class="auth-subtitle" id="auth-subtitle">Acesse para salvar e editar notas</p>
+
+      <!-- Botão voltar para página inicial -->
+      <button class="auth-back" id="auth-back-btn">
+        <i class="ti ti-arrow-left"></i> Voltar para o início
+      </button>
+
+      <!-- Ícone decorativo -->
+      <div class="auth-icon">
+        <i class="ti ti-receipt" id="auth-icon-i"></i>
+      </div>
+
+      <h2 id="auth-title">Entrar na conta</h2>
+      <p class="auth-subtitle" id="auth-subtitle">Acesse para salvar e editar notas fiscais</p>
+
+      <!-- Erro -->
       <div class="auth-error" id="auth-error"></div>
+
+      <!-- Campo usuário -->
       <div class="auth-field">
         <label for="auth-username">Usuário</label>
-        <input type="text" id="auth-username" placeholder="seu_usuario" autocomplete="username" />
+        <div class="auth-input-wrap">
+          <i class="ti ti-user"></i>
+          <input type="text" id="auth-username" placeholder="seu_usuario" autocomplete="username" />
+        </div>
       </div>
+
+      <!-- Campo senha -->
       <div class="auth-field">
         <label for="auth-password">Senha</label>
-        <input type="password" id="auth-password" placeholder="••••••" autocomplete="current-password" />
+        <div class="auth-input-wrap">
+          <i class="ti ti-lock"></i>
+          <input type="password" id="auth-password" placeholder="••••••" autocomplete="current-password" />
+        </div>
       </div>
-      <button class="btn primary full" id="auth-submit-btn" style="margin-top:.25rem;">Entrar</button>
+
+      <!-- Botão principal -->
+      <button class="auth-submit" id="auth-submit-btn">
+        <i class="ti ti-login" id="auth-submit-icon"></i>
+        <span id="auth-submit-label">Entrar</span>
+      </button>
+
+      <div class="auth-divider">ou</div>
+
+      <!-- Toggle login/cadastro -->
       <div class="auth-toggle">
         <span id="auth-toggle-text">Não tem conta?</span>
-        <button id="auth-toggle-btn">Cadastrar</button>
+        <button id="auth-toggle-btn">Criar conta</button>
       </div>
+
     </div>
   </div>
 
@@ -1819,8 +1944,12 @@
     const authUsername  = document.getElementById('auth-username');
     const authPassword  = document.getElementById('auth-password');
     const authSubmitBtn = document.getElementById('auth-submit-btn');
+    const authSubmitIcon= document.getElementById('auth-submit-icon');
+    const authSubmitLbl = document.getElementById('auth-submit-label');
+    const authIconI     = document.getElementById('auth-icon-i');
     const authToggleBtn = document.getElementById('auth-toggle-btn');
     const authToggleTxt = document.getElementById('auth-toggle-text');
+    const authBackBtn   = document.getElementById('auth-back-btn');
     const btnAbrirLogin = document.getElementById('btn-abrir-login');
     const btnLogout     = document.getElementById('btn-logout');
 
@@ -1831,11 +1960,23 @@
       authError.textContent = '';
       authUsername.value = '';
       authPassword.value = '';
-      authTitle.textContent     = mode === 'login' ? 'Entrar' : 'Cadastrar';
-      authSubtitle.textContent  = mode === 'login' ? 'Acesse para salvar e editar notas' : 'Crie sua conta para começar';
-      authSubmitBtn.textContent = mode === 'login' ? 'Entrar' : 'Criar conta';
-      authToggleTxt.textContent = mode === 'login' ? 'Não tem conta?' : 'Já tem conta?';
-      authToggleBtn.textContent = mode === 'login' ? 'Cadastrar' : 'Entrar';
+      if (mode === 'login') {
+        authTitle.textContent    = 'Entrar na conta';
+        authSubtitle.textContent = 'Acesse para salvar e editar notas fiscais';
+        authSubmitLbl.textContent= 'Entrar';
+        authSubmitIcon.className = 'ti ti-login';
+        authIconI.className      = 'ti ti-receipt';
+        authToggleTxt.textContent= 'Não tem conta?';
+        authToggleBtn.textContent= 'Criar conta';
+      } else {
+        authTitle.textContent    = 'Criar conta';
+        authSubtitle.textContent = 'Cadastre-se para começar a salvar notas';
+        authSubmitLbl.textContent= 'Criar conta';
+        authSubmitIcon.className = 'ti ti-user-plus';
+        authIconI.className      = 'ti ti-user-plus';
+        authToggleTxt.textContent= 'Já tem conta?';
+        authToggleBtn.textContent= 'Entrar';
+      }
       authOverlay.classList.remove('hidden');
       authUsername.focus();
     }
@@ -1846,6 +1987,10 @@
 
     authToggleBtn.addEventListener('click', () => {
       openAuthModal(authMode === 'login' ? 'register' : 'login');
+    });
+
+    authBackBtn.addEventListener('click', () => {
+      closeAuthModal();
     });
 
     btnAbrirLogin.addEventListener('click', () => openAuthModal('login'));
@@ -1866,7 +2011,7 @@
       }
 
       authSubmitBtn.disabled = true;
-      authSubmitBtn.textContent = 'Aguarde...';
+      authSubmitLbl.textContent = 'Aguarde...';
 
       try {
         const res = await _origFetch('/api/auth?action=' + authMode, {
@@ -1887,7 +2032,7 @@
         authError.textContent = 'Erro de conexão.';
       } finally {
         authSubmitBtn.disabled = false;
-        authSubmitBtn.textContent = authMode === 'login' ? 'Entrar' : 'Criar conta';
+        authSubmitLbl.textContent = authMode === 'login' ? 'Entrar' : 'Criar conta';
       }
     });
 
