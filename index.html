@@ -1340,14 +1340,19 @@
 
         const comparacaoHtml = renderComparacao(dataComp);
 
+        const mostrarDesfazerHist = data.mesclado === true && !!getToken();
+        const desfazerHistHtml = mostrarDesfazerHist
+          ? `<button class="btn-modo-mesclar" id="btn-desfazer-mesclagem-hist" title="Desfazer mesclagem deste produto" style="font-size:12px; height:32px;">
+               <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer Mesclagem
+             </button>`
+          : '';
+
         buscarResult.innerHTML = `
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <button class="btn-voltar-busca" onclick="buscarProduto()" style="margin:0;">
               <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
             </button>
-            <button class="btn-modo-mesclar somente-logado" id="btn-desfazer-mesclagem-hist" title="Desfazer mesclagem deste produto" style="font-size:12px; height:32px; display:none;">
-              <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer Mesclagem
-            </button>
+            ${desfazerHistHtml}
           </div>
           <div class="summary-grid">
             <div class="metric">
@@ -1369,14 +1374,7 @@
         `;
 
         const btnDesfazerHist = document.getElementById('btn-desfazer-mesclagem-hist');
-        // Mostrar apenas se o backend confirmar que este produto tem mesclagem ativa
-        if (data.mesclado === true) {
-          btnDesfazerHist.style.display = 'flex';
-        } else {
-          btnDesfazerHist.style.display = 'none';
-        }
-
-        btnDesfazerHist.addEventListener('click', async () => {
+        if (btnDesfazerHist) btnDesfazerHist.addEventListener('click', async () => {
           btnDesfazerHist.disabled = true;
           btnDesfazerHist.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> Desfazendo...';
           try {
