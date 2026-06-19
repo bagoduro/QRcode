@@ -1446,16 +1446,25 @@
         </div>
       `).join('');
 
+      // Botão desfazer só existe no DOM se houver mesclagem ativa E usuário logado
+      const temDesfazer = sugestoes.length === 1 && sugestoes[0].mesclado === true && !!getToken();
+      const btnDesfazerHtml = temDesfazer
+        ? `<button class="btn-modo-mesclar" id="btn-desfazer-mesclagem" title="Desfazer mesclagem deste produto">
+              <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer
+           </button>`
+        : '';
+      const btnMesclarHtml = getToken()
+        ? `<button class="btn-modo-mesclar" id="btn-modo-mesclar">
+              <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
+           </button>`
+        : '';
+
       buscarResult.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
           <p class="sugestao-titulo" style="margin:0;">Encontrei <strong>${sugestoes.length}</strong> produto${sugestoes.length !== 1 ? 's' : ''} com "<strong>${termo}</strong>". Qual você quer ver?</p>
           <div style="display:flex; gap:8px;">
-            <button class="btn-modo-mesclar somente-logado" id="btn-desfazer-mesclagem" title="Desfazer mesclagem deste produto" style="display:none;">
-              <i class="ti ti-git-pull-request" aria-hidden="true"></i> Desfazer
-            </button>
-            <button class="btn-modo-mesclar somente-logado" id="btn-modo-mesclar">
-              <i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar
-            </button>
+            ${btnDesfazerHtml}
+            ${btnMesclarHtml}
           </div>
         </div>
         <div class="sugestao-lista" id="sugestao-lista">${sugestoesHtml}</div>
@@ -1474,8 +1483,8 @@
 
       // Modo mesclar toggle
       let modoMesclar = false;
-      const btnModo = document.getElementById('btn-modo-mesclar');
-      const btnDesfazer = document.getElementById('btn-desfazer-mesclagem');
+      const btnModo     = document.getElementById('btn-modo-mesclar');
+      const btnDesfazer = document.getElementById('btn-desfazer-mesclagem'); // pode ser null
       const lista   = document.getElementById('sugestao-lista');
       const toolbar = document.getElementById('mesclar-toolbar');
       const inputNomeFinal = document.getElementById('input-nome-final');
@@ -1483,15 +1492,7 @@
       const labelConfirmar = document.getElementById('mesclar-confirmar-label');
       const btnCancelar    = document.getElementById('btn-mesclar-cancelar');
 
-      // Mostrar botão "Desfazer mesclagem" apenas se houver exatamente 1 resultado
-      // e ele for um produto mesclado (campo mesclado=true vindo do backend)
-      if (sugestoes.length === 1 && sugestoes[0].mesclado === true) {
-        btnDesfazer.style.display = 'flex';
-      } else {
-        btnDesfazer.style.display = 'none';
-      }
-
-      btnDesfazer.addEventListener('click', async () => {
+      if (btnDesfazer) btnDesfazer.addEventListener('click', async () => {
         btnDesfazer.disabled = true;
         btnDesfazer.innerHTML = '<i class="ti ti-loader-2 spin" aria-hidden="true"></i> Desfazendo...';
         
