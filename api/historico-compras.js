@@ -252,11 +252,20 @@ export default async function handler(req, res) {
         return vAtual < vMenor ? atual : menor;
       }, historico[0]);
 
+      // Verifica se este produto tem regra de mesclagem ativa
+      const mergeRules = db.collection('merge_rules');
+      const nomeProdNorm = (produto || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const regraAtiva = nomeProdNorm
+        ? await mergeRules.findOne({ nome_final_normalizado: nomeProdNorm })
+        : null;
+
       return res.json({
         produto: produto || codigo,
         ultima_compra: ultimaCompra,
         menor_preco: menorPreco,
         historico,
+        mesclado: !!regraAtiva,
       });
     } else if (recorrentes === 'true') {
       // Caso 2: itens recorrentes (compras frequentes, ex: higiene pessoal e produtos de casa)

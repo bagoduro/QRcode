@@ -1369,9 +1369,11 @@
         `;
 
         const btnDesfazerHist = document.getElementById('btn-desfazer-mesclagem-hist');
-        // Mostrar se algum item no histórico tem descricao_original
-        if (data.historico.some(h => h.descricao_original)) {
+        // Mostrar apenas se o backend confirmar que este produto tem mesclagem ativa
+        if (data.mesclado === true) {
           btnDesfazerHist.style.display = 'flex';
+        } else {
+          btnDesfazerHist.style.display = 'none';
         }
 
         btnDesfazerHist.addEventListener('click', async () => {
