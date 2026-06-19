@@ -1530,21 +1530,6 @@
         }
       }
 
-      btnModo.addEventListener('click', () => {
-        modoMesclar = !modoMesclar;
-        lista.classList.toggle('modo-mesclar', modoMesclar);
-        toolbar.classList.toggle('ativa', modoMesclar);
-        btnModo.classList.toggle('ativo', modoMesclar);
-        btnModo.innerHTML = modoMesclar
-          ? '<i class="ti ti-x" aria-hidden="true"></i> Cancelar'
-          : '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
-        if (!modoMesclar) {
-          lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
-          inputNomeFinal.value = '';
-          btnConfirmar.disabled = true;
-        }
-      });
-
       lista.addEventListener('click', (e) => {
         const item = e.target.closest('.sugestao-item');
         if (!item) return;
@@ -1556,20 +1541,37 @@
         }
       });
 
-      inputNomeFinal.addEventListener('input', atualizarToolbar);
+      if (btnModo) {
+        btnModo.addEventListener('click', () => {
+          modoMesclar = !modoMesclar;
+          lista.classList.toggle('modo-mesclar', modoMesclar);
+          toolbar.classList.toggle('ativa', modoMesclar);
+          btnModo.classList.toggle('ativo', modoMesclar);
+          btnModo.innerHTML = modoMesclar
+            ? '<i class="ti ti-x" aria-hidden="true"></i> Cancelar'
+            : '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+          if (!modoMesclar) {
+            lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+            inputNomeFinal.value = '';
+            btnConfirmar.disabled = true;
+          }
+        });
 
-      btnCancelar.addEventListener('click', () => {
-        modoMesclar = false;
-        lista.classList.remove('modo-mesclar');
-        toolbar.classList.remove('ativa');
-        btnModo.classList.remove('ativo');
-        btnModo.innerHTML = '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
-        lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
-        inputNomeFinal.value = '';
-        btnConfirmar.disabled = true;
-      });
+        inputNomeFinal.addEventListener('input', atualizarToolbar);
 
-      btnConfirmar.addEventListener('click', async () => {
+        btnCancelar.addEventListener('click', () => {
+          modoMesclar = false;
+          lista.classList.remove('modo-mesclar');
+          toolbar.classList.remove('ativa');
+          btnModo.classList.remove('ativo');
+          btnModo.innerHTML = '<i class="ti ti-git-merge" aria-hidden="true"></i> Mesclar';
+          lista.querySelectorAll('.sugestao-item').forEach((el) => el.classList.remove('selecionado'));
+          inputNomeFinal.value = '';
+          btnConfirmar.disabled = true;
+        });
+      }
+
+      if (btnConfirmar) btnConfirmar.addEventListener('click', async () => {
         const descricoes  = getSelecionados();
         const nome_final  = inputNomeFinal.value.trim();
         if (descricoes.length < 2 || !nome_final) return;
