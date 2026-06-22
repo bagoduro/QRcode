@@ -1849,7 +1849,7 @@
             <div class="item-card" id="nota-${idx}" onclick="toggleNota(${idx})">
               <div class="top-row">
                 <p>${c.local || 'Estabelecimento'}</p>
-                <span>${formatValor(c.valor_pago)} <i class="ti ti-chevron-down chevron" aria-hidden="true"></i></span>
+                <span>${formatValor(c.valor_total)} <i class="ti ti-chevron-down chevron" aria-hidden="true"></i></span>
               </div>
               <div class="meta">${formatData(c.data_compra)} • ${c.quantidade_itens || (c.itens || []).length} ite${(c.itens||[]).length === 1 ? 'm' : 'ns'}</div>
               <div class="nota-itens">
