@@ -430,8 +430,9 @@ app.get('/api/auth', authHandler);
 app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
-    const blacklist = await db.collection('auto_merge_blacklist').find({}).toArray();
-    res.json({ itens: blacklist.map(b => b.nome_final_normalizado) });
+    // Busca produtos com block_auto_merge = true
+    const blocked = await db.collection('products').find({ block_auto_merge: true }).toArray();
+    res.json({ itens: blocked.map(b => b.nome_normalizado) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -444,7 +445,6 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const purchases = db.collection('purchases');
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
-  const blacklistCol = db.collection('auto_merge_blacklist');
 
   // ── DESFAZER MESCLAGEM ──────────────────────────────────────────────────────
   if (action === 'unmerge') {
@@ -459,9 +459,17 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const originais = resAgg[0].originais;
     for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
+      // Restaura o produto original e marca como bloqueado para auto-merge
       await products.updateOne(
         { nome_normalizado: dNorm },
-        { $set: { nome_original: desc, nome_normalizado: dNorm, updatedAt: new Date() } },
+        {
+          $set: {
+            nome_original: desc,
+            nome_normalizado: dNorm,
+            updatedAt: new Date(),
+            block_auto_merge: true  // ⭐ Bloqueia auto-merge
+          }
+        },
         { upsert: true }
       );
       const p = await products.findOne({ nome_normalizado: dNorm });
@@ -482,33 +490,36 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const nomeFinalNorm = normalizeProductName(descricao_mesclada);
     await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
-    // Insere cada ORIGINAL na blacklist (para bloquear auto-merge futuro)
-    for (const desc of originais) {
-      const dNorm = normalizeProductName(desc);
-      await blacklistCol.updateOne(
-        { nome_final_normalizado: dNorm },
-        {
-          $set: {
-            nome_final_normalizado: dNorm,
-            atualizado_em: new Date(),
-          },
-          $setOnInsert: { criado_em: new Date() },
-        },
-        { upsert: true }
-      );
-    }
-
     return res.json({ ok: true });
   }
 
   // ── MESCLAR PRODUTOS (PADRÃO) ──────────────────────────────────────────────
+  // Antes de mesclar, verifica se algum dos produtos está bloqueado
+  if (!action) {
+    for (const desc of descricoes) {
+      const dNorm = normalizeProductName(desc);
+      const product = await products.findOne({ nome_normalizado: dNorm });
+      if (product && product.block_auto_merge === true) {
+        return res.status(409).json({
+          blocked: true,
+          message: `Produto "${desc}" está bloqueado para mesclagem automática. Mescle manualmente se desejar.`
+        });
+      }
+    }
+  }
+
   const nomeFinal = nome_final.trim();
   const nomeFinalNorm = normalizeProductName(nomeFinal);
 
   await products.updateOne(
     { nome_normalizado: nomeFinalNorm },
     {
-      $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() },
+      $set: {
+        nome_original: nomeFinal,
+        nome_normalizado: nomeFinalNorm,
+        updatedAt: new Date(),
+        block_auto_merge: false  // ⭐ Desbloqueia (caso estivesse bloqueado)
+      },
       $setOnInsert: { createdAt: new Date(), codigo: null }
     },
     { upsert: true }
@@ -548,13 +559,12 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
         },
         { upsert: true }
       );
+      // Remove o bloqueio do original, se existir, pois agora ele será mesclado
+      await products.updateOne(
+        { nome_normalizado: dNorm },
+        { $set: { block_auto_merge: false } }
+      );
     }
-  }
-
-  // Remove da blacklist TODOS os originais que foram mesclados manualmente
-  for (const desc of descricoes) {
-    const dNorm = normalizeProductName(desc);
-    await blacklistCol.deleteOne({ nome_final_normalizado: dNorm });
   }
 
   return res.json({ ok: true });
