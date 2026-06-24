@@ -9,10 +9,8 @@ export default function MesclagensTab() {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [mesclagens, setMesclagens] = useState(null);
-  const [pendingUndo, setPendingUndo] = useState(null); // { nome_final }
+  const [pendingUndo, setPendingUndo] = useState(null);
   const [undoingNome, setUndoingNome] = useState(null);
-  
-  // Estados para a nova interface de consolidação
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
   const [migrateSecret, setMigrateSecret] = useState('');
   const [consolidando, setConsolidando] = useState(false);
@@ -32,7 +30,6 @@ export default function MesclagensTab() {
 
   useEffect(() => {
     carregar();
-    // Tenta pegar o secret da URL inicialmente
     const urlParams = new URLSearchParams(window.location.search);
     const secret = urlParams.get('secret');
     if (secret) setMigrateSecret(secret);
@@ -45,9 +42,10 @@ export default function MesclagensTab() {
     setUndoingNome(nome_final);
     try {
       await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: nome_final });
-      setMesclagens((prev) => prev.filter((m) => m.nome_final !== nome_final));
       setSuccess('Mesclagem desfeita com sucesso.');
       setTimeout(() => setSuccess(null), 3000);
+      // Recarrega a lista inteira do backend
+      await carregar();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -103,7 +101,6 @@ export default function MesclagensTab() {
           </button>
         </div>
 
-        {/* Interface Integrada de Senha/Confirmação */}
         {showMigrateConfirm && (
           <div className="alert alert-info" style={{ marginBottom: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px' }}>
             <h4 style={{ marginTop: 0, marginBottom: '10px' }}>Consolidar Banco</h4>
