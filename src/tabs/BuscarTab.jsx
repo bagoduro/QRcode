@@ -16,7 +16,8 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   const [detalhe, setDetalhe] = useState(null);
   const [mensagem, setMensagem] = useState(null);
   const [autoMesclando, setAutoMesclando] = useState(false);
-  const [autoMergeEnabled, setAutoMergeEnabled] = useState(false);
+  // 🔥 AUTO-MERGE SEMPRE ATIVO POR PADRÃO (inclusive para deslogados)
+  const [autoMergeEnabled, setAutoMergeEnabled] = useState(true);
 
   useEffect(() => {
     if (!jumpToProduct) return;
@@ -35,6 +36,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   }
 
   async function autoMesclar(lista) {
+    // Filtra bloqueados (campo blocked vindo do backend)
     const naoBloqueados = lista.filter(item => !item.blocked);
 
     if (naoBloqueados.length < 2) {
@@ -87,7 +89,9 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      if (autoMergeEnabled && lista.some(item => !item.blocked)) {
+      // 🔥 Lógica ajustada: deslogados sempre executam; logados dependem do checkbox
+      const deveExecutarAutoMerge = !isLoggedIn || autoMergeEnabled;
+      if (deveExecutarAutoMerge && lista.some(item => !item.blocked)) {
         setAutoMesclando(true);
         const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
         setAutoMesclando(false);
@@ -98,6 +102,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         }
         setSugestoes({ lista: listaMesclada, termo });
       } else {
+        // Mostra a lista original (sem mesclar)
         setSugestoes({ lista, termo });
         if (lista.every(item => item.blocked)) {
           setMensagem({ tone: 'empty', text: 'Todos os produtos encontrados estão bloqueados.' });
@@ -164,6 +169,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
           <p className="helper">Busca por aproximação no nome do item registrado nas notas.</p>
         </div>
 
+        {/* Toggle visível APENAS para moderadores logados */}
         {isLoggedIn && (
           <div className="field" style={{ marginTop: '-8px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
@@ -232,7 +238,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   );
 }
 
-// ─── SUGESTÕES ────────────────────────────────────────────────────────────────
+// ─── SUGESTÕES (sem alterações) ────────────────────────────────────────────────
 
 function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensagem, setError }) {
   const [modoMesclar, setModoMesclar] = useState(false);
@@ -404,7 +410,7 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
   );
 }
 
-// ─── DETALHE ──────────────────────────────────────────────────────────────────
+// ─── DETALHE (sem alterações) ──────────────────────────────────────────────────
 
 function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) {
   const [desfazendo, setDesfazendo] = useState(false);
@@ -527,7 +533,7 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
   );
 }
 
-// ─── COMPARAÇÃO ──────────────────────────────────────────────────────────────
+// ─── COMPARAÇÃO (sem alterações) ──────────────────────────────────────────────
 
 function Comparacao({ data }) {
   if (!data || !data.lojas || data.lojas.length < 2) return null;
