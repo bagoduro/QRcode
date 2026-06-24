@@ -50,11 +50,18 @@ export default function MesclagensTab() {
     setConsolidando(true);
     setError(null);
     try {
-      // Tenta obter o secret da URL ou do localStorage para a migração
+      // Tenta obter o secret da URL
       const urlParams = new URLSearchParams(window.location.search);
-      const secret = urlParams.get('secret') || '';
+      let secret = urlParams.get('secret');
       
-      const res = await apiPost(`/migrate${secret ? '?secret=' + secret : ''}`);
+      // Se não houver secret na URL, pede ao usuário
+      if (!secret) {
+        secret = prompt('Por favor, informe a senha (MIGRATE_SECRET) para consolidar o banco:');
+      }
+      
+      if (!secret) return; // Usuário cancelou
+      
+      const res = await apiPost(`/migrate?secret=${encodeURIComponent(secret)}`);
       if (res.ok) {
         alert(`Sucesso! ${res.grupos_mesclados || 0} grupos de produtos foram unificados.`);
         carregar();

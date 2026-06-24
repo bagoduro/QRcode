@@ -59,8 +59,13 @@ export default async function handler(req, res) {
 
   // Proteção por senha
   const secret = process.env.MIGRATE_SECRET;
-  if (!secret || req.query.secret !== secret) {
-    return res.status(401).json({ error: 'Não autorizado. Informe ?secret=SUA_SENHA' });
+  
+  if (!secret) {
+    return res.status(500).json({ error: 'Configuração ausente: A variável de ambiente MIGRATE_SECRET não foi definida no servidor.' });
+  }
+
+  if (req.query.secret !== secret) {
+    return res.status(401).json({ error: 'Senha incorreta. Informe ?secret=SUA_SENHA corretamente.' });
   }
 
   if (req.method !== 'POST') {
