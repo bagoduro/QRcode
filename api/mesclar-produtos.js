@@ -224,6 +224,27 @@ export default async function handler(req, res) {
       );
     }
 
+    // 🔥 CASCATA: se algum dos nomes mesclados agora (ex: "C") já era o
+    // nome_final de mesclagens anteriores (ex: A→C, B→C), essas regras
+    // antigas precisam ser redirecionadas para o novo nome final ("E"),
+    // senão continuam apontando para um nome/produto que acabou de ser
+    // absorvido (e cujo produto canônico foi deletado acima). Sem isso,
+    // notas futuras com descrição "A" ou "B" voltam a cair em "C" em vez
+    // de se juntar ao grupo "E".
+    if (descNormsAntigas.length > 0) {
+      await mergeRules.updateMany(
+        { nome_final_normalizado: { $in: descNormsAntigas } },
+        {
+          $set: {
+            nome_final:             nomeFinal,
+            nome_final_normalizado: nomeFinalNorm,
+            product_id:             produtoCanonico._id,
+            updatedAt:              new Date(),
+          },
+        }
+      );
+    }
+
     return res.json({
       ok: true,
       nome_final: nomeFinal,
