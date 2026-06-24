@@ -485,7 +485,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const originais = resAgg[0].originais;
     for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
-      // Restaura o produto original e **libera** para auto-merge (block_auto_merge = false)
+      // 🔥 ALTERAÇÃO: agora BLOQUEIA (block_auto_merge = true)
       await products.updateOne(
         { nome_normalizado: dNorm },
         {
@@ -493,7 +493,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
             nome_original: desc,
             nome_normalizado: dNorm,
             updatedAt: new Date(),
-            block_auto_merge: false   // <-- ALTERAÇÃO: agora libera em vez de bloquear
+            block_auto_merge: true   // <-- BLOQUEIA para evitar re-merge
           }
         },
         { upsert: true }

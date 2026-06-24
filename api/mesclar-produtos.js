@@ -20,7 +20,7 @@ export default async function handler(req, res) {
         if (!grupos.has(key)) {
           grupos.set(key, {
             nome_final: r.nome_final,
-            nome_final_normalizado: key, // ← CAMPO ADICIONADO
+            nome_final_normalizado: key,
             atualizado_em: r.updatedAt || r.createdAt || null,
             origens: [],
           });
@@ -37,7 +37,6 @@ export default async function handler(req, res) {
 
       const gruposArray = [...grupos.values()];
 
-      // Buscar bloqueio para cada grupo
       const normas = gruposArray.map(g => g.nome_final_normalizado);
       const produtos = await db.collection('products').find({ nome_normalizado: { $in: normas } }).toArray();
       const blockedMap = new Map(produtos.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
@@ -100,6 +99,7 @@ export default async function handler(req, res) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
+        // 🔥 ALTERAÇÃO: agora BLOQUEIA (block_auto_merge = true)
         await products.updateOne(
           { nome_normalizado: descOriginalNorm },
           {
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
-              block_auto_merge: false   // ← LIBERA para auto‑merge
+              block_auto_merge: true   // <-- BLOQUEIA para evitar re-merge
             },
           },
           { upsert: true }
