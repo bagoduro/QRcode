@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // --- LISTAR MESCLAGENS JÁ REALIZADAS (para a aba de revisão) ---
+  // --- LISTAR MESCLAGENS JÁ REALIZADAS ---
   if (req.method === 'GET') {
     try {
       const db = await getDb();
@@ -61,13 +61,13 @@ export default async function handler(req, res) {
     const norm = (text = '') =>
       text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-    // --- LÓGICA PARA DESFAZER MESCLAGEM (CORRIGIDA) ---
+    // --- DESFAZER MESCLAGEM (CORRIGIDO) ---
     if (action === 'unmerge') {
       if (!descricao_mesclada) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
       }
 
-      // 1. Buscar a regra de mesclagem correspondente
+      // 1. Encontrar a regra principal
       let regra = await mergeRules.findOne({ nome_final: descricao_mesclada });
       if (!regra) {
         const descNorm = norm(descricao_mesclada);
@@ -77,61 +77,47 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Regra de mesclagem não encontrada para esta descrição.' });
       }
 
-      const nomeFinal = regra.nome_final; // Nome exato usado nos itens
+      const nomeFinalNorm = regra.nome_final_normalizado;
 
-      // 2. Buscar itens que tenham este nome final (case‑insensitive) e que tenham descricao_original
-      const pipeline = [
-        { $unwind: '$itens' },
-        {
-          $match: {
-            'itens.descricao': { $regex: `^${nomeFinal}$`, $options: 'i' },
-            'itens.descricao_original': { $exists: true }
-          }
-        },
-        {
-          $group: {
-            _id: null,
-            originais: { $addToSet: '$itens.descricao_original' }
-          }
-        }
-      ];
-
-      const resultAggregation = await purchases.aggregate(pipeline).toArray();
-      if (resultAggregation.length === 0) {
-        return res.status(404).json({ error: 'Nenhum item mesclado encontrado para esta descrição.' });
+      // 2. Buscar todas as regras deste grupo
+      const todasRegras = await mergeRules.find({ nome_final_normalizado: nomeFinalNorm }).toArray();
+      if (todasRegras.length === 0) {
+        return res.status(404).json({ error: 'Nenhuma regra de mesclagem encontrada para este grupo.' });
       }
 
-      const descricoesOriginais = resultAggregation[0].originais;
       let totalRestaurados = 0;
+      const originaisRecuperados = [];
 
-      for (const descOriginal of descricoesOriginais) {
-        const descNorm = norm(descOriginal);
+      // 3. Para cada regra, restaurar os itens correspondentes
+      for (const r of todasRegras) {
+        const descOriginal = r.descricao_original;
+        const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
-        // Recria o produto original
+        // Recriar o produto original
         await products.updateOne(
-          { nome_normalizado: descNorm },
+          { nome_normalizado: descOriginalNorm },
           {
             $setOnInsert: { createdAt: new Date(), codigo: null },
             $set: {
               nome_original: descOriginal,
-              nome_normalizado: descNorm,
+              nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
             },
           },
           { upsert: true }
         );
-        const prodOriginal = await products.findOne({ nome_normalizado: descNorm });
+        const prodOriginal = await products.findOne({ nome_normalizado: descOriginalNorm });
 
-        // Atualiza os itens que têm esse nome final e descricao_original
+        // Atualizar os itens que têm este descricao_original e a descrição atual é o nome final
         const updateResult = await purchases.updateMany(
           {
-            'itens.descricao': { $regex: `^${nomeFinal}$`, $options: 'i' },
-            'itens.descricao_original': descOriginal
+            'itens.descricao_original': descOriginal,
+            'itens.descricao': regra.nome_final
           },
           {
             $set: {
               'itens.$[elem].descricao': descOriginal,
-              'itens.$[elem].descricao_normalizada': descNorm,
+              'itens.$[elem].descricao_normalizada': descOriginalNorm,
               'itens.$[elem].product_id': prodOriginal._id
             },
             $unset: {
@@ -141,20 +127,21 @@ export default async function handler(req, res) {
           { arrayFilters: [{ 'elem.descricao_original': descOriginal }] }
         );
         totalRestaurados += updateResult.modifiedCount;
+        originaisRecuperados.push(descOriginal);
       }
 
-      // Remove as regras de mesclagem
-      await mergeRules.deleteMany({ nome_final_normalizado: regra.nome_final_normalizado });
+      // 4. Remover todas as regras deste grupo
+      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
       return res.json({
         ok: true,
         mensagem: 'Mesclagem desfeita com sucesso.',
         itens_restaurados: totalRestaurados,
-        originais_recuperados: descricoesOriginais
+        originais_recuperados: originaisRecuperados
       });
     }
 
-    // --- LÓGICA PARA MESCLAR PRODUTOS (PADRÃO) ---
+    // --- MESCLAR PRODUTOS (PADRÃO) ---
     if (!Array.isArray(descricoes) || descricoes.length < 2) {
       return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
     }
