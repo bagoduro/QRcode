@@ -5,7 +5,7 @@ import { getDb } from './db.js';
 import authHandler, { verifyJwt } from './api/auth.js';
 import Fuse from 'fuse.js';
 
-// ── Middleware: exige token JWT válido ────────────────────────────────────────
+// ── Middleware ────────────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
   const auth  = req.headers?.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -83,46 +83,57 @@ const parseItemRow = (row, $) => {
   };
 };
 
-// ─── NOVA FUNÇÃO: auto‑merge de itens novos ──────────────────────────────────
+// ─── AUTO-MERGE DE ITENS NOVOS (CORRIGIDO) ──────────────────────────────────
 async function autoMergeNewItems(db, itensNovos) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
 
+  console.log(`[autoMergeNewItems] Processando ${itensNovos.length} itens...`);
+
   for (const item of itensNovos) {
     const descNorm = normalizeProductName(item.descricao);
 
-    // 1. Verifica se já existe regra para este item (pula se já tiver)
+    // 1. Verifica se já existe regra para este item
     const existingRule = await mergeRules.findOne({
       descricao_original_normalizada: descNorm
     });
-    if (existingRule) continue;
+    if (existingRule) {
+      console.log(`[autoMergeNewItems] Item "${item.descricao}" já tem regra, pulando.`);
+      continue;
+    }
 
-    // 2. Busca todos os produtos (exceto ele mesmo) e verifica se algum é similar
+    // 2. Busca todos os produtos (exceto ele mesmo)
     const allProducts = await products.find({
       nome_normalizado: { $ne: descNorm }
     }).toArray();
 
-    // Filtra produtos bloqueados (block_auto_merge: true) – não mescla com bloqueados
+    console.log(`[autoMergeNewItems] Encontrados ${allProducts.length} produtos para comparar com "${item.descricao}"`);
+
+    // Filtra produtos bloqueados (não podem ser âncora)
     const candidatos = allProducts.filter(p => p.block_auto_merge !== true);
 
-    if (candidatos.length === 0) continue;
+    if (candidatos.length === 0) {
+      console.log(`[autoMergeNewItems] Nenhum candidato disponível (todos bloqueados).`);
+      continue;
+    }
 
     const fuse = new Fuse(candidatos, {
       keys: ['nome_original', 'nome_normalizado'],
-      threshold: 0.4,
+      threshold: 0.35, // Ajustei para ficar mais sensível
       includeScore: true,
       ignoreLocation: true,
     });
 
-    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.4);
+    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.35);
+
+    console.log(`[autoMergeNewItems] Encontrados ${similares.length} similares para "${item.descricao}"`);
 
     if (similares.length > 0) {
-      // Pega o mais similar como âncora
       const ancora = similares[0].item;
-      const descricoesParaMesclar = [item.descricao, ancora.nome_original];
+      console.log(`[autoMergeNewItems] Âncora escolhida: "${ancora.nome_original}" (score: ${similares[0].score})`);
 
-      // Cria regra de mesclagem para o item novo
+      // Cria regra de mesclagem
       await mergeRules.updateOne(
         { descricao_original_normalizada: descNorm },
         {
@@ -139,14 +150,15 @@ async function autoMergeNewItems(db, itensNovos) {
         { upsert: true }
       );
 
-      // Atualiza as compras antigas que tenham esse item (sem descricao_original)
+      // Atualiza compras antigas que tenham esse item (sem descricao_original)
       await purchases.updateMany(
         { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
         { $set: { 'itens.$[elem].descricao_original': item.descricao } },
         { arrayFilters: [{ 'elem.descricao': item.descricao }] }
       );
+
       // Atualiza todas as ocorrências desse item para o nome final
-      await purchases.updateMany(
+      const updateResult = await purchases.updateMany(
         { 'itens.descricao': item.descricao },
         {
           $set: {
@@ -158,11 +170,14 @@ async function autoMergeNewItems(db, itensNovos) {
         { arrayFilters: [{ 'elem.descricao': item.descricao }] }
       );
 
-      console.log(`[autoMergeNewItems] Item "${item.descricao}" mesclado com "${ancora.nome_original}"`);
+      console.log(`[autoMergeNewItems] Item "${item.descricao}" mesclado com "${ancora.nome_original}" (${updateResult.modifiedCount} ocorrências atualizadas)`);
+    } else {
+      console.log(`[autoMergeNewItems] Nenhum similar encontrado para "${item.descricao}"`);
     }
   }
 }
 
+// ─── SALVAR COMPRA ────────────────────────────────────────────────────────────
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
@@ -225,6 +240,7 @@ const savePurchase = async (url, resultado) => {
     console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
 
     // ─── AUTO‑MERGE DE ITENS NOVOS ──────────────────────────────────────────
+    console.log('[savePurchase] Iniciando auto‑merge para itens novos...');
     await autoMergeNewItems(db, itensOriginais);
 
     return { duplicate: false };
@@ -234,6 +250,7 @@ const savePurchase = async (url, resultado) => {
   }
 };
 
+// ─── FUNÇÕES AUXILIARES ──────────────────────────────────────────────────────
 function parseValorNum(valor) {
   if (!valor) return null;
   const limpo = String(valor)
@@ -251,6 +268,7 @@ function calcPrecoUnitario(valor_total, quantidade) {
   return Math.round((vt / qt) * 100) / 100;
 }
 
+// ─── PARSE HTML ──────────────────────────────────────────────────────────────
 const parseHtml = (html) => {
   const $ = load(html);
 
@@ -325,7 +343,7 @@ const fetchAndParseUrl = async (url) => {
   return parseHtml(html);
 };
 
-// --- ENDPOINTS ---
+// ─── ENDPOINTS ────────────────────────────────────────────────────────────────
 
 app.post('/consulta-qrcode', async (req, res) => {
   const { url } = req.body;
@@ -513,7 +531,6 @@ app.post('/api/auth', authHandler);
 app.get('/api/auth', authHandler);
 
 // ── BLACKLIST DE AUTO-MERGE ─────────────────────────────────────────────
-// Endpoint para consultar itens bloqueados (usado pelo frontend)
 app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -524,7 +541,7 @@ app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
   }
 });
 
-// ── ENDPOINT PARA ALTERNAR BLOQUEIO MANUALMENTE ──────────────────────────
+// ── TOGGLE-BLOCK ──────────────────────────────────────────────────────────
 app.post('/api/toggle-block', requireAuth, async (req, res) => {
   const { nome_normalizado, blocked } = req.body;
   if (!nome_normalizado) {
@@ -545,7 +562,7 @@ app.post('/api/toggle-block', requireAuth, async (req, res) => {
   }
 });
 
-// ── ENDPOINT DE MESCLAGEM (com suporte à blacklist) ──────────────────────
+// ── MESCLAGEM ─────────────────────────────────────────────────────────────
 app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const {
     action,
@@ -572,7 +589,6 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const originais = resAgg[0].originais;
     for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
-      // BLOQUEIA automaticamente ao desfazer
       await products.updateOne(
         { nome_normalizado: dNorm },
         {
@@ -626,7 +642,6 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const nomeFinal = nome_final.trim();
   const nomeFinalNorm = normalizeProductName(nomeFinal);
 
-  // 🔥 MUDANÇA: mesclagem manual também BLOQUEIA o produto final
   await products.updateOne(
     { nome_normalizado: nomeFinalNorm },
     {
@@ -675,7 +690,6 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
         },
         { upsert: true }
       );
-      // Remove o bloqueio do original, se existir, pois agora ele será mesclado
       await products.updateOne(
         { nome_normalizado: dNorm },
         { $set: { block_auto_merge: false } }
