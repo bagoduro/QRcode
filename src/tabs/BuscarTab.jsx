@@ -41,7 +41,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     let alguemFoiMesclado = false;
 
     for (let tentativa = 0; tentativa < MAX_AUTO_MERGE_PASSES; tentativa++) {
-      const grupo = sugerirGrupoDuplicado(atual);
+      const grupo = sugerirGrupoDuplicado(atual, 0.35);
       if (!grupo) break;
 
       try {
