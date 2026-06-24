@@ -36,7 +36,6 @@ export default async function handler(req, res) {
       }
 
       const gruposArray = [...grupos.values()];
-
       const normas = gruposArray.map(g => g.nome_final_normalizado);
       const produtos = await db.collection('products').find({ nome_normalizado: { $in: normas } }).toArray();
       const blockedMap = new Map(produtos.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
@@ -99,7 +98,7 @@ export default async function handler(req, res) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
-        // 🔥 ALTERAÇÃO: agora BLOQUEIA (block_auto_merge = true)
+        // BLOQUEIA ao desfazer
         await products.updateOne(
           { nome_normalizado: descOriginalNorm },
           {
@@ -108,7 +107,7 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
-              block_auto_merge: true   // <-- BLOQUEIA para evitar re-merge
+              block_auto_merge: true
             },
           },
           { upsert: true }
@@ -157,6 +156,7 @@ export default async function handler(req, res) {
     const nomeFinal     = nome_final.trim();
     const nomeFinalNorm = norm(nomeFinal);
 
+    // 🔥 MUDANÇA: mesclagem manual também BLOQUEIA o produto final
     await products.updateOne(
       { nome_normalizado: nomeFinalNorm },
       {
@@ -165,7 +165,7 @@ export default async function handler(req, res) {
           nome_original: nomeFinal,
           nome_normalizado: nomeFinalNorm,
           updatedAt: new Date(),
-          block_auto_merge: false
+          block_auto_merge: true   // <-- agora bloqueia
         },
       },
       { upsert: true }

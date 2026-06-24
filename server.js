@@ -485,7 +485,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const originais = resAgg[0].originais;
     for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
-      // 🔥 ALTERAÇÃO: agora BLOQUEIA (block_auto_merge = true)
+      // BLOQUEIA automaticamente ao desfazer
       await products.updateOne(
         { nome_normalizado: dNorm },
         {
@@ -493,7 +493,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
             nome_original: desc,
             nome_normalizado: dNorm,
             updatedAt: new Date(),
-            block_auto_merge: true   // <-- BLOQUEIA para evitar re-merge
+            block_auto_merge: true
           }
         },
         { upsert: true }
@@ -539,6 +539,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const nomeFinal = nome_final.trim();
   const nomeFinalNorm = normalizeProductName(nomeFinal);
 
+  // 🔥 MUDANÇA: mesclagem manual também BLOQUEIA o produto final
   await products.updateOne(
     { nome_normalizado: nomeFinalNorm },
     {
@@ -546,7 +547,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
         nome_original: nomeFinal,
         nome_normalizado: nomeFinalNorm,
         updatedAt: new Date(),
-        block_auto_merge: false
+        block_auto_merge: true   // <-- agora bloqueia
       },
       $setOnInsert: { createdAt: new Date(), codigo: null }
     },

@@ -16,7 +16,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   const [detalhe, setDetalhe] = useState(null);
   const [mensagem, setMensagem] = useState(null);
   const [autoMesclando, setAutoMesclando] = useState(false);
-  const [autoMergeEnabled, setAutoMergeEnabled] = useState(false); // visível só para moderadores
+  const [autoMergeEnabled, setAutoMergeEnabled] = useState(false);
 
   useEffect(() => {
     if (!jumpToProduct) return;
@@ -34,7 +34,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
-  // 🔥 FUNÇÃO CORRIGIDA: usa o campo `blocked` da lista (vem do backend)
   async function autoMesclar(lista) {
     const naoBloqueados = lista.filter(item => !item.blocked);
 
@@ -88,7 +87,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      // 🔥 Só executa auto-merge se o toggle estiver ligado E houver itens não bloqueados
       if (autoMergeEnabled && lista.some(item => !item.blocked)) {
         setAutoMesclando(true);
         const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
@@ -100,7 +98,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         }
         setSugestoes({ lista: listaMesclada, termo });
       } else {
-        // Mostra a lista original (sem mesclar)
         setSugestoes({ lista, termo });
         if (lista.every(item => item.blocked)) {
           setMensagem({ tone: 'empty', text: 'Todos os produtos encontrados estão bloqueados.' });
@@ -167,7 +164,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
           <p className="helper">Busca por aproximação no nome do item registrado nas notas.</p>
         </div>
 
-        {/* Toggle visível apenas para moderadores logados */}
         {isLoggedIn && (
           <div className="field" style={{ marginTop: '-8px' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
@@ -236,7 +232,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   );
 }
 
-// ─── SUGESTÕES (usa `s.blocked`) ─────────────────────────────────────────────
+// ─── SUGESTÕES ────────────────────────────────────────────────────────────────
 
 function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensagem, setError }) {
   const [modoMesclar, setModoMesclar] = useState(false);
@@ -408,7 +404,7 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
   );
 }
 
-// ─── DETALHE (usa `data.blocked`) ──────────────────────────────────────────
+// ─── DETALHE ──────────────────────────────────────────────────────────────────
 
 function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) {
   const [desfazendo, setDesfazendo] = useState(false);

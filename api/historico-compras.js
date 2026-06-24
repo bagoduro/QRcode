@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Método não permitido. Use GET ou DELETE.' });
   }
 
-  // DELETE: excluir nota
+  // DELETE
   if (req.method === 'DELETE') {
     const { url } = req.query;
     if (!url) return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
@@ -73,7 +73,7 @@ export default async function handler(req, res) {
 
       const sugestoesList = await purchases.aggregate(pipeline).toArray();
 
-      // 🔥 Buscar bloqueio para cada sugestão
+      // Buscar bloqueio para cada sugestão
       const normas = sugestoesList.map(s => s._id);
       const produtosDocs = await products.find({ nome_normalizado: { $in: normas } }).toArray();
       const blockedMap = new Map(produtosDocs.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
@@ -86,7 +86,7 @@ export default async function handler(req, res) {
         menor_preco_unitario: s.menor_preco_unitario,
         ultimo_valor: s.ultimo_valor,
         ultimo_local: s.ultimo_local,
-        blocked: blockedMap.get(s._id) || false,   // ← NOVO
+        blocked: blockedMap.get(s._id) || false,
       }));
 
       return res.json({
@@ -96,7 +96,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ─── COMPARAÇÃO ENTRE LOJAS ──────────────────────────────────────────────
+    // ─── COMPARAÇÃO ──────────────────────────────────────────────────────────
     if (comparar && (produto || codigo)) {
       const matchStage = {};
       if (codigo) {
@@ -182,7 +182,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ─── HISTÓRICO DE UM PRODUTO ESPECÍFICO ──────────────────────────────────
+    // ─── HISTÓRICO DE UM PRODUTO ────────────────────────────────────────────
     if (produto || codigo) {
       const matchStage = {};
       if (codigo) {
@@ -233,13 +233,12 @@ export default async function handler(req, res) {
         return vAtual < vMenor ? atual : menor;
       }, historico[0]);
 
-      // 🔥 Verificar bloqueio
+      // Verificar bloqueio
       const nomeProdNorm = (produto || '')
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
       const prodDoc = await products.findOne({ nome_normalizado: nomeProdNorm });
       const blocked = prodDoc?.block_auto_merge === true;
 
-      // Verificar regra de mesclagem
       const mergeRules = db.collection('merge_rules');
       const regraAtiva = nomeProdNorm ? await mergeRules.findOne({ nome_final_normalizado: nomeProdNorm }) : null;
 
@@ -249,7 +248,7 @@ export default async function handler(req, res) {
         menor_preco: menorPreco,
         historico,
         mesclado: !!regraAtiva,
-        blocked,   // ← NOVO
+        blocked,
       });
     }
 
@@ -286,7 +285,6 @@ export default async function handler(req, res) {
 
       const grupos = await purchases.aggregate(pipeline).toArray();
 
-      // 🔥 Buscar bloqueio para cada item recorrente
       const normas = grupos.map(g => g.descricao_normalizada).filter(Boolean);
       const produtosDocs = await products.find({ nome_normalizado: { $in: normas } }).toArray();
       const blockedMap = new Map(produtosDocs.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
@@ -308,7 +306,7 @@ export default async function handler(req, res) {
           vezes_comprado: grupo.vezes_comprado,
           ultima_compra: ocorrenciasOrdenadas[0],
           menor_preco: menorPreco,
-          blocked: blockedMap.get(grupo.descricao_normalizada) || false,   // ← NOVO
+          blocked: blockedMap.get(grupo.descricao_normalizada) || false,
         };
       });
 
@@ -319,7 +317,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ─── LISTA GERAL DE COMPRAS ──────────────────────────────────────────────
+    // ─── LISTA GERAL ──────────────────────────────────────────────────────────
     const pipeline = [
       {
         $project: {
