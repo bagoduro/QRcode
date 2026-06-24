@@ -77,6 +77,9 @@ const savePurchase = async (url, resultado) => {
       .toArray();
 
     const produtosPorNomeNorm = new Map(produtosExistentes.map((p) => [p.nome_normalizado, p]));
+    const produtosPorCodigo   = new Map(
+      produtosExistentes.filter((p) => p.codigo).map((p) => [p.codigo, p])
+    );
 
     const fuse = new Fuse(produtosExistentes, {
       keys: ['nome_normalizado'],
@@ -138,10 +141,14 @@ const savePurchase = async (url, resultado) => {
         }
 
         // ── FUZZY-MERGE: nome nunca visto, mas parecido com produto existente ──
-        // Só tenta fuzzy quando não há código (código já é um identificador
-        // confiável por si só) e quando não existe já um produto com esse
-        // nome normalizado exatamente igual (esse caso o upsert padrão resolve).
-        if (!item.codigo && !produtosPorNomeNorm.has(nomeNorm)) {
+        // O código do SEFAZ é interno de cada loja — duas lojas raramente usam
+        // o mesmo código pro mesmo produto. Por isso só pulamos o fuzzy quando
+        // o código deste item já corresponde a um produto conhecido (aí o
+        // fluxo padrão por código já resolve); ou quando o nome normalizado já
+        // existe exatamente igual (idem, fluxo padrão resolve).
+        const codigoJaConhecido = item.codigo && produtosPorCodigo.has(item.codigo);
+
+        if (!codigoJaConhecido && !produtosPorNomeNorm.has(nomeNorm)) {
           const achados = fuse
             .search(nomeNorm)
             .filter((r) => r.score <= FUZZY_THRESHOLD)
