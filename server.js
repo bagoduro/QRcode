@@ -38,15 +38,13 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// ─── UPSERT AGORA PRIORIZA O NOME NORMALIZADO (NÃO O CÓDIGO) ──────────────
+// ─── UPSERT PRIORIZA O NOME NORMALIZADO (NÃO O CÓDIGO) ──────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
-  // 1. Busca por nome_normalizado (independente do código)
   let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
   if (existing) {
-    // Atualiza updatedAt e, se quiser, pode armazenar o código em um array
     await products.updateOne(
       { _id: existing._id },
       { $set: { updatedAt: new Date() } }
@@ -54,7 +52,6 @@ const upsertProduct = async (db, item) => {
     return existing._id;
   }
 
-  // 2. Se não existe, cria com o código (se houver)
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
@@ -124,7 +121,7 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── AUTO-MERGE DE ITENS NOVOS (THRESHOLD = 0.6) ──────────────────────────
+// ─── AUTO-MERGE DE ITENS NOVOS (THRESHOLD = 0.8, BUSCA PELO NORMALIZADO) ──
 async function autoMergeNewItems(db, itensNovos) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
@@ -145,8 +142,7 @@ async function autoMergeNewItems(db, itensNovos) {
 
     const productId = produtoAtual._id;
 
-    // 1. Produto com o MESMO nome_normalizado (exato) – já compartilhariam o mesmo _id,
-    //    mas pode haver duplicatas antigas; vamos mesclar se houver.
+    // 1. Produto com o MESMO nome_normalizado (exato)
     const produtosExatos = await products.find({
       nome_normalizado: descNorm,
       _id: { $ne: productId },
@@ -154,8 +150,7 @@ async function autoMergeNewItems(db, itensNovos) {
     }).toArray();
 
     if (produtosExatos.length > 0) {
-      const ancora = produtosExatos[0];
-      await criarRegraEMesclar(db, item, ancora, descNorm);
+      await criarRegraEMesclar(db, item, produtosExatos[0], descNorm);
       continue;
     }
 
@@ -167,17 +162,21 @@ async function autoMergeNewItems(db, itensNovos) {
 
     if (allProducts.length === 0) continue;
 
-    // 3. Fuse com threshold 0.6 (mais tolerante)
+    // 3. Fuse com threshold 0.8, comparando APENAS o nome_normalizado
     const fuse = new Fuse(allProducts, {
-      keys: ['nome_original', 'nome_normalizado'],
-      threshold: 0.6,
+      keys: ['nome_normalizado'],      // <-- usa só o normalizado
+      threshold: 0.8,                  // <-- bem tolerante
       includeScore: true,
       ignoreLocation: true,
     });
 
-    const similares = fuse.search(item.descricao)
-      .filter(r => r.score <= 0.6)
+    // Busca usando o nome normalizado do item novo (não a descrição original)
+    const similares = fuse.search(descNorm)
+      .filter(r => r.score <= 0.8)
       .sort((a, b) => a.score - b.score);
+
+    // (Opcional) Log para debug – remova depois se quiser
+    // console.log(`[autoMerge] Buscando por "${descNorm}" → ${similares.length} similares`);
 
     if (similares.length > 0) {
       const ancora = similares[0].item;
@@ -194,9 +193,7 @@ const savePurchase = async (url, resultado) => {
     const mergeRules = db.collection('merge_rules');
 
     const existing = await purchases.findOne({ url });
-    if (existing) {
-      return { duplicate: true };
-    }
+    if (existing) return { duplicate: true };
 
     const itensOriginais = resultado.itens.map(item => ({ ...item }));
 
@@ -462,7 +459,7 @@ app.delete('/historico-compras', requireAuth, async (req, res) => {
   }
 });
 
-// --- ENDPOINT DE MIGRAÇÃO (threshold 0.6 também) ---
+// --- ENDPOINT DE MIGRAÇÃO (threshold 0.8, busca por normalizado) ---
 app.post('/api/migrate', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -493,8 +490,15 @@ app.post('/api/migrate', requireAuth, async (req, res) => {
       const restante = [...lista];
       restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
       const ancora = restante[0];
-      const fuse = new Fuse(restante, { keys: ['descricao'], threshold: 0.6 });
-      const achados = fuse.search(ancora.descricao).filter(r => r.score <= 0.6).map(r => r.item);
+      const fuse = new Fuse(restante, {
+        keys: ['descricao_normalizada'],  // compara pelo normalizado
+        threshold: 0.8,
+        includeScore: true,
+        ignoreLocation: true,
+      });
+      const achados = fuse.search(ancora.descricao_normalizada)
+        .filter(r => r.score <= 0.8)
+        .map(r => r.item);
       return achados.length >= 2 ? { ancora, itens: achados } : null;
     }
 
