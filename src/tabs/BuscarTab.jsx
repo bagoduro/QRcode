@@ -16,6 +16,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   const [detalhe, setDetalhe] = useState(null);
   const [mensagem, setMensagem] = useState(null);
   const [autoMesclando, setAutoMesclando] = useState(false);
+  const [autoMergeEnabled, setAutoMergeEnabled] = useState(false); // visível só para moderadores
 
   useEffect(() => {
     if (!jumpToProduct) return;
@@ -33,14 +34,10 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
-  // 🔥 FUNÇÃO CORRIGIDA: remove bloqueados ANTES de tentar mesclar
-  async function autoMesclar(lista, blacklist = []) {
-    // 1. Filtra a lista removendo TODOS os itens bloqueados
-    const naoBloqueados = lista.filter(
-      (item) => !blacklist.includes(item.descricao_normalizada)
-    );
+  // 🔥 FUNÇÃO CORRIGIDA: usa o campo `blocked` da lista (vem do backend)
+  async function autoMesclar(lista) {
+    const naoBloqueados = lista.filter(item => !item.blocked);
 
-    // Se sobrar menos de 2, não há o que mesclar
     if (naoBloqueados.length < 2) {
       return { lista: naoBloqueados, alguemFoiMesclado: false };
     }
@@ -60,13 +57,9 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         });
         alguemFoiMesclado = true;
       } catch (err) {
-        // Se der erro (ex: algum item foi bloqueado entre tempo), para
         break;
       }
 
-      // Remove os itens mesclados da lista, mantendo apenas o âncora?
-      // Na verdade, o backend já atualizou as compras, mas para a exibição
-      // precisamos remover todos os itens do grupo, exceto o âncora
       const descartar = new Set(grupo.itens.map((i) => i.descricao));
       descartar.delete(grupo.ancora.descricao);
       atual = atual.filter((i) => !descartar.has(i.descricao));
@@ -81,15 +74,8 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     resetResultViews();
     setLoading(true);
     setAutoMesclando(false);
-    try {
-      let blacklist = [];
-      try {
-        const blacklistData = await apiGet('/auto-merge-blacklist');
-        blacklist = blacklistData?.itens || [];
-      } catch (e) {
-        console.warn('Não foi possível carregar a blacklist', e);
-      }
 
+    try {
       const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
       if (!data.sugestoes || data.sugestoes.length === 0) {
         setMensagem({ tone: 'empty', text: 'Nenhuma compra encontrada para esse produto.' });
@@ -102,16 +88,24 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      setAutoMesclando(true);
-      const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista, blacklist);
-      setAutoMesclando(false);
+      // 🔥 Só executa auto-merge se o toggle estiver ligado E houver itens não bloqueados
+      if (autoMergeEnabled && lista.some(item => !item.blocked)) {
+        setAutoMesclando(true);
+        const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
+        setAutoMesclando(false);
 
-      if (alguemFoiMesclado) {
-        setMensagem({ tone: 'success', text: 'Alguns produtos foram mesclados automaticamente.' });
-        setTimeout(() => setMensagem(null), 4000);
+        if (alguemFoiMesclado) {
+          setMensagem({ tone: 'success', text: 'Alguns produtos foram mesclados automaticamente.' });
+          setTimeout(() => setMensagem(null), 4000);
+        }
+        setSugestoes({ lista: listaMesclada, termo });
+      } else {
+        // Mostra a lista original (sem mesclar)
+        setSugestoes({ lista, termo });
+        if (lista.every(item => item.blocked)) {
+          setMensagem({ tone: 'empty', text: 'Todos os produtos encontrados estão bloqueados.' });
+        }
       }
-
-      setSugestoes({ lista: listaMesclada, termo });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -173,6 +167,26 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
           <p className="helper">Busca por aproximação no nome do item registrado nas notas.</p>
         </div>
 
+        {/* Toggle visível apenas para moderadores logados */}
+        {isLoggedIn && (
+          <div className="field" style={{ marginTop: '-8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={autoMergeEnabled}
+                onChange={(e) => setAutoMergeEnabled(e.target.checked)}
+              />
+              <i className="ti ti-git-merge" aria-hidden="true" style={{ fontSize: '16px' }} />
+              Mesclar automaticamente produtos parecidos
+            </label>
+            <p className="helper" style={{ marginTop: '2px' }}>
+              {autoMergeEnabled
+                ? 'O sistema vai unir produtos com nomes similares (ignorando bloqueados).'
+                : 'Produtos similares aparecerão separados (recomendado para evitar mesclagens indesejadas).'}
+            </p>
+          </div>
+        )}
+
         <div className="result-area">
           {loading && (
             <Loading
@@ -222,7 +236,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   );
 }
 
-// ─── SUGESTÕES ────────────────────────────────────────────────────────────────
+// ─── SUGESTÕES (usa `s.blocked`) ─────────────────────────────────────────────
 
 function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensagem, setError }) {
   const [modoMesclar, setModoMesclar] = useState(false);
@@ -394,7 +408,7 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
   );
 }
 
-// ─── DETALHE ──────────────────────────────────────────────────────────────────
+// ─── DETALHE (usa `data.blocked`) ──────────────────────────────────────────
 
 function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) {
   const [desfazendo, setDesfazendo] = useState(false);
