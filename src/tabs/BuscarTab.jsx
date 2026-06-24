@@ -34,6 +34,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   }
 
   async function autoMesclar(lista, blacklist = []) {
+    console.log('[autoMesclar] Blacklist recebida:', blacklist);
     let atual = lista;
     let alguemFoiMesclado = false;
 
@@ -41,8 +42,11 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       const grupo = sugerirGrupoDuplicado(atual, 0.35);
       if (!grupo) break;
 
+      // Verifica se algum item do grupo está na blacklist
       const grupoNorms = grupo.itens.map(i => i.descricao_normalizada);
-      if (grupoNorms.some(n => blacklist.includes(n))) {
+      const bloqueados = grupoNorms.filter(n => blacklist.includes(n));
+      if (bloqueados.length > 0) {
+        console.log('[autoMesclar] Pulando grupo com bloqueados:', bloqueados);
         const descartar = new Set(grupo.itens.map(i => i.descricao));
         atual = atual.filter(i => !descartar.has(i.descricao));
         continue;
@@ -55,6 +59,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
           nome_final: grupo.ancora.descricao,
         });
         alguemFoiMesclado = true;
+        console.log('[autoMesclar] Mesclagem automática executada:', grupo.ancora.descricao);
       } catch (err) {
         if (err.blocked === true) {
           const descartar = new Set(grupo.itens.map(i => i.descricao));
@@ -80,11 +85,15 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setAutoMesclando(false);
     try {
       let blacklist = [];
-      try {
-        const blacklistData = await apiGet('/auto-merge-blacklist');
-        blacklist = blacklistData?.itens || [];
-      } catch (e) {
-        console.warn('Não foi possível carregar a blacklist', e);
+      // Carrega a blacklist APENAS se o usuário estiver logado
+      if (isLoggedIn) {
+        try {
+          const blacklistData = await apiGet('/auto-merge-blacklist');
+          blacklist = blacklistData?.itens || [];
+          console.log('[buscarPorTermo] Blacklist carregada:', blacklist);
+        } catch (e) {
+          console.warn('Não foi possível carregar a blacklist', e);
+        }
       }
 
       const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
@@ -99,16 +108,25 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      setAutoMesclando(true);
-      const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista, blacklist);
-      setAutoMesclando(false);
+      // Só executa auto-merge se usuário logado e tiver mais de um item
+      if (isLoggedIn && lista.length > 1) {
+        setAutoMesclando(true);
+        const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista, blacklist);
+        setAutoMesclando(false);
 
-      if (alguemFoiMesclado) {
-        setMensagem({ tone: 'success', text: 'Alguns produtos foram mesclados automaticamente.' });
-        setTimeout(() => setMensagem(null), 4000);
+        if (alguemFoiMesclado) {
+          setMensagem({
+            tone: 'success',
+            text: 'Alguns produtos foram mesclados automaticamente.',
+          });
+          setTimeout(() => setMensagem(null), 4000);
+        }
+        lista = listaMesclada;
+      } else {
+        console.log('[buscarPorTermo] Auto-merge pulado (usuário não logado ou apenas 1 item)');
       }
 
-      setSugestoes({ lista: listaMesclada, termo });
+      setSugestoes({ lista, termo });
     } catch (err) {
       setError(err.message);
     } finally {
