@@ -1,62 +1,75 @@
 import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
-
-const SCANNER_ELEMENT_ID = 'qr-camera-view';
+import jsQR from 'jsqr';
 
 export default function Scanner({ onResult }) {
   const [scanning, setScanning] = useState(false);
   const [justScanned, setJustScanned] = useState(false);
-  const html5QrRef = useRef(null);
-  const containerRef = useRef(null);
+
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const scanningRef = useRef(false);
 
   useEffect(() => () => stopScanner(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function startScanner() {
     setJustScanned(false);
     setScanning(true);
+    scanningRef.current = true;
 
     try {
-      const instance = new Html5Qrcode(SCANNER_ELEMENT_ID);
-      html5QrRef.current = instance;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      streamRef.current = stream;
 
-      await instance.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 220, height: 220 }, aspectRatio: 1 },
-        (decodedText) => {
-          setJustScanned(true);
-          if (navigator.vibrate) navigator.vibrate(100);
-          stopScanner();
-          onResult(decodedText);
-        },
-        () => {
-          // ignora frames sem leitura
+      const videoEl = videoRef.current;
+      videoEl.srcObject = stream;
+      await videoEl.play();
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      function tick() {
+        if (!scanningRef.current) return;
+        if (videoEl.readyState === videoEl.HAVE_ENOUGH_DATA) {
+          canvas.width = videoEl.videoWidth;
+          canvas.height = videoEl.videoHeight;
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert',
+          });
+          if (code && code.data) {
+            setJustScanned(true);
+            if (navigator.vibrate) navigator.vibrate(100);
+            stopScanner();
+            onResult(code.data);
+            return;
+          }
         }
-      );
-
-      // Esconde os elementos default da lib (link de swap de câmera, etc.)
-      const root = containerRef.current;
-      if (root) {
-        root.querySelectorAll('img, select, #' + SCANNER_ELEMENT_ID + '__dashboard_section_swaplink')
-          .forEach((el) => { el.style.display = 'none'; });
+        animFrameRef.current = requestAnimationFrame(tick);
       }
+
+      animFrameRef.current = requestAnimationFrame(tick);
     } catch (err) {
-      setScanning(false);
+      stopScanner();
       onResult(null, 'Não foi possível acessar a câmera: ' + (err.message || err));
     }
   }
 
-  async function stopScanner() {
+  function stopScanner() {
+    scanningRef.current = false;
     setScanning(false);
-    const instance = html5QrRef.current;
-    if (instance) {
-      try {
-        await instance.stop();
-        instance.clear();
-      } catch {
-        // já parado
-      }
-      html5QrRef.current = null;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
     }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
   }
 
   function handleToggle() {
@@ -78,8 +91,8 @@ export default function Scanner({ onResult }) {
         {scanning ? 'Parar câmera' : 'Iniciar câmera'}
       </button>
 
-      <div className={`scanner-wrapper ${scanning ? 'active' : ''}`} ref={containerRef}>
-        <div id={SCANNER_ELEMENT_ID} className="qr-camera-view" />
+      <div className={`scanner-wrapper ${scanning ? 'active' : ''}`}>
+        <video ref={videoRef} className="qr-video" autoPlay muted playsInline />
         <div className="scanner-overlay">
           <div className="scanner-box">
             <div className="scan-line" />

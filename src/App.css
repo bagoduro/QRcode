@@ -324,16 +324,10 @@ select:focus {
   margin: 0 0 12px;
 }
 
-.qr-camera-view video {
+.qr-video {
   width: 100% !important;
   display: block;
   border-radius: var(--radius-md);
-}
-
-.qr-camera-view img,
-.qr-camera-view select,
-.qr-camera-view button {
-  display: none !important;
 }
 
 .scanner-wrapper {
