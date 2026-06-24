@@ -33,13 +33,23 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
-  async function autoMesclar(lista) {
+  //  autoMesclar agora recebe a blacklist e ignora grupos bloqueados
+  async function autoMesclar(lista, blacklist = []) {
     let atual = lista;
     let alguemFoiMesclado = false;
 
     for (let tentativa = 0; tentativa < MAX_AUTO_MERGE_PASSES; tentativa++) {
       const grupo = sugerirGrupoDuplicado(atual, 0.35);
       if (!grupo) break;
+
+      //  Verifica se algum item do grupo está na blacklist
+      const grupoNorms = grupo.itens.map(i => i.descricao_normalizada);
+      if (grupoNorms.some(n => blacklist.includes(n))) {
+        // Remove esses itens da lista atual para não ficar em loop infinito
+        const descartar = new Set(grupo.itens.map(i => i.descricao));
+        atual = atual.filter(i => !descartar.has(i.descricao));
+        continue; // pula este grupo
+      }
 
       try {
         await apiPost('/mesclar-produtos', {
@@ -67,6 +77,16 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setLoading(true);
     setAutoMesclando(false);
     try {
+      //  Carrega a blacklist antes de iniciar o auto‑merge
+      let blacklist = [];
+      try {
+        const blacklistData = await apiGet('/auto-merge-blacklist');
+        blacklist = blacklistData?.itens || [];
+      } catch (e) {
+        // Se falhar, apenas não bloqueia nada
+        console.warn('Não foi possível carregar a blacklist', e);
+      }
+
       const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
       if (!data.sugestoes || data.sugestoes.length === 0) {
         setMensagem({ tone: 'empty', text: 'Nenhuma compra encontrada para esse produto.' });
@@ -80,7 +100,8 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       let lista = data.sugestoes;
 
       setAutoMesclando(true);
-      const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
+      //  Passa a blacklist para o autoMesclar
+      const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista, blacklist);
       setAutoMesclando(false);
 
       if (alguemFoiMesclado) {

@@ -29,7 +29,6 @@ app.use((req, res, next) => {
 
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
 
-// Normaliza nome de produto: remove acentos, lowercase, colapsa espaços
 const normalizeProductName = (text = '') => {
   return text
     .normalize('NFD')
@@ -39,7 +38,6 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// Salva/atualiza produto na coleção products e retorna o productId
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const nomeNormalizado = normalizeProductName(item.descricao);
@@ -98,11 +96,9 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
-    // Carregar regras de mesclagem para aplicar automaticamente
     const regras = await mergeRules.find({}).toArray();
     const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
 
-    // Upsert cada item no catálogo de produtos e enriquecer com product_id + nome_normalizado
     const itensEnriquecidos = await Promise.all(
       resultado.itens.map(async (item) => {
         const normOriginal = normalizeProductName(item.descricao);
@@ -359,7 +355,7 @@ app.delete('/historico-compras', requireAuth, async (req, res) => {
   }
 });
 
-// --- NOVO ENDPOINT DE MIGRAÇÃO ---
+// --- ENDPOINT DE MIGRAÇÃO ---
 app.post('/api/migrate', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -429,40 +425,127 @@ app.post('/api/migrate', requireAuth, async (req, res) => {
 app.post('/api/auth', authHandler);
 app.get('/api/auth', authHandler);
 
+// ── BLACKLIST DE AUTO-MERGE ─────────────────────────────────────────────
+// Endpoint para consultar itens bloqueados (usado pelo frontend)
+app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const blacklist = await db.collection('auto_merge_blacklist').find({}).toArray();
+    res.json({ itens: blacklist.map(b => b.nome_final_normalizado) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ENDPOINT DE MESCLAGEM (com suporte à blacklist) ──────────────────────
 app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   const { action, descricoes, nome_final, descricao_mesclada } = req.body || {};
   const db = await getDb();
   const purchases = db.collection('purchases');
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
+  const blacklistCol = db.collection('auto_merge_blacklist');
 
+  // ── DESFAZER MESCLAGEM ──────────────────────────────────────────────────────
   if (action === 'unmerge') {
-    const pipeline = [{ $unwind: '$itens' }, { $match: { 'itens.descricao': descricao_mesclada, 'itens.descricao_original': { $exists: true } } }, { $group: { _id: null, originais: { $addToSet: '$itens.descricao_original' } } }];
+    const pipeline = [
+      { $unwind: '$itens' },
+      { $match: { 'itens.descricao': descricao_mesclada, 'itens.descricao_original': { $exists: true } } },
+      { $group: { _id: null, originais: { $addToSet: '$itens.descricao_original' } } }
+    ];
     const resAgg = await purchases.aggregate(pipeline).toArray();
     if (resAgg.length === 0) return res.status(404).json({ error: 'Não encontrado' });
+
     for (const desc of resAgg[0].originais) {
       const dNorm = normalizeProductName(desc);
       await products.updateOne({ nome_normalizado: dNorm }, { $set: { nome_original: desc, nome_normalizado: dNorm, updatedAt: new Date() } }, { upsert: true });
       const p = await products.findOne({ nome_normalizado: dNorm });
-      await purchases.updateMany({ 'itens.descricao': descricao_mesclada, 'itens.descricao_original': desc }, { $set: { 'itens.$[elem].descricao': desc, 'itens.$[elem].descricao_normalizada': dNorm, 'itens.$[elem].product_id': p._id }, $unset: { 'itens.$[elem].descricao_original': "" } }, { arrayFilters: [{ 'elem.descricao': descricao_mesclada, 'elem.descricao_original': desc }] });
+      await purchases.updateMany(
+        { 'itens.descricao': descricao_mesclada, 'itens.descricao_original': desc },
+        {
+          $set: {
+            'itens.$[elem].descricao': desc,
+            'itens.$[elem].descricao_normalizada': dNorm,
+            'itens.$[elem].product_id': p._id
+          },
+          $unset: { 'itens.$[elem].descricao_original': "" }
+        },
+        { arrayFilters: [{ 'elem.descricao': descricao_mesclada, 'elem.descricao_original': desc }] }
+      );
     }
-    await mergeRules.deleteMany({ nome_final_normalizado: normalizeProductName(descricao_mesclada) });
+
+    const nomeFinalNorm = normalizeProductName(descricao_mesclada);
+    await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
+
+    //  Adiciona à blacklist para impedir auto-merge futuro
+    await blacklistCol.updateOne(
+      { nome_final_normalizado: nomeFinalNorm },
+      {
+        $set: {
+          nome_final_normalizado: nomeFinalNorm,
+          atualizado_em: new Date(),
+        },
+        $setOnInsert: { criado_em: new Date() },
+      },
+      { upsert: true }
+    );
+
     return res.json({ ok: true });
   }
 
+  // ── MESCLAR PRODUTOS (PADRÃO) ──────────────────────────────────────────────
   const nomeFinal = nome_final.trim();
   const nomeFinalNorm = normalizeProductName(nomeFinal);
-  await products.updateOne({ nome_normalizado: nomeFinalNorm }, { $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() } }, { upsert: true });
+
+  await products.updateOne(
+    { nome_normalizado: nomeFinalNorm },
+    {
+      $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() },
+      $setOnInsert: { createdAt: new Date(), codigo: null }
+    },
+    { upsert: true }
+  );
   const prod = await products.findOne({ nome_normalizado: nomeFinalNorm });
 
   for (const desc of descricoes) {
-    await purchases.updateMany({ 'itens.descricao': desc, 'itens.descricao_original': { $exists: false } }, { $set: { 'itens.$[elem].descricao_original': desc } }, { arrayFilters: [{ 'elem.descricao': desc }] });
-    await purchases.updateMany({ 'itens.descricao': desc }, { $set: { 'itens.$[elem].descricao': nomeFinal, 'itens.$[elem].descricao_normalizada': nomeFinalNorm, 'itens.$[elem].product_id': prod._id }, }, { arrayFilters: [{ 'elem.descricao': desc }] });
+    await purchases.updateMany(
+      { 'itens.descricao': desc, 'itens.descricao_original': { $exists: false } },
+      { $set: { 'itens.$[elem].descricao_original': desc } },
+      { arrayFilters: [{ 'elem.descricao': desc }] }
+    );
+    await purchases.updateMany(
+      { 'itens.descricao': desc },
+      {
+        $set: {
+          'itens.$[elem].descricao': nomeFinal,
+          'itens.$[elem].descricao_normalizada': nomeFinalNorm,
+          'itens.$[elem].product_id': prod._id,
+        },
+      },
+      { arrayFilters: [{ 'elem.descricao': desc }] }
+    );
     if (normalizeProductName(desc) !== nomeFinalNorm) {
       const dNorm = normalizeProductName(desc);
-      await mergeRules.updateOne({ descricao_original_normalizada: dNorm }, { $set: { descricao_original: desc, nome_final: nomeFinal, nome_final_normalizado: nomeFinalNorm, product_id: prod._id, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+      await mergeRules.updateOne(
+        { descricao_original_normalizada: dNorm },
+        {
+          $set: {
+            descricao_original: desc,
+            nome_final: nomeFinal,
+            nome_final_normalizado: nomeFinalNorm,
+            product_id: prod._id,
+            updatedAt: new Date(),
+          },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true }
+      );
     }
   }
+
+  //  Remove da blacklist (pois o usuário mesclou manualmente)
+  await blacklistCol.deleteOne({ nome_final_normalizado: nomeFinalNorm });
+
   return res.json({ ok: true });
 });
 
