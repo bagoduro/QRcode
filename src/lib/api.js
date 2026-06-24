@@ -36,7 +36,12 @@ async function parseResponse(res, fallbackMsg) {
   } catch {
     throw new Error(`Resposta inválida do servidor (status ${res.status}).`);
   }
-  if (!res.ok) throw new Error(data.error || fallbackMsg);
+  if (!res.ok) {
+    const err = new Error(data.error || fallbackMsg);
+    // Propaga blocked se existir
+    if (data.blocked !== undefined) err.blocked = data.blocked;
+    throw err;
+  }
   return data;
 }
 

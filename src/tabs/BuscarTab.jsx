@@ -33,7 +33,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
-  // autoMesclar agora recebe a blacklist e ignora grupos bloqueados
   async function autoMesclar(lista, blacklist = []) {
     let atual = lista;
     let alguemFoiMesclado = false;
@@ -45,10 +44,9 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       // Verifica se algum item do grupo está na blacklist (local)
       const grupoNorms = grupo.itens.map(i => i.descricao_normalizada);
       if (grupoNorms.some(n => blacklist.includes(n))) {
-        // Remove esses itens da lista atual para não ficar em loop infinito
         const descartar = new Set(grupo.itens.map(i => i.descricao));
         atual = atual.filter(i => !descartar.has(i.descricao));
-        continue; // pula este grupo
+        continue;
       }
 
       try {
@@ -59,8 +57,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         alguemFoiMesclado = true;
       } catch (err) {
         // Se o erro for de bloqueio (backend retorna 409 com blocked: true)
-        if (err.message && err.message.includes('bloqueado')) {
-          // Remove o grupo inteiro da lista atual e continua para o próximo grupo
+        if (err.blocked === true) {
           const descartar = new Set(grupo.itens.map(i => i.descricao));
           atual = atual.filter(i => !descartar.has(i.descricao));
           continue;
@@ -85,13 +82,11 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setLoading(true);
     setAutoMesclando(false);
     try {
-      // Carrega a blacklist antes de iniciar o auto‑merge
       let blacklist = [];
       try {
         const blacklistData = await apiGet('/auto-merge-blacklist');
         blacklist = blacklistData?.itens || [];
       } catch (e) {
-        // Se falhar, apenas não bloqueia nada
         console.warn('Não foi possível carregar a blacklist', e);
       }
 
@@ -108,7 +103,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       let lista = data.sugestoes;
 
       setAutoMesclando(true);
-      // Passa a blacklist para o autoMesclar
       const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista, blacklist);
       setAutoMesclando(false);
 

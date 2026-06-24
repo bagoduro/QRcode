@@ -467,7 +467,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
             nome_original: desc,
             nome_normalizado: dNorm,
             updatedAt: new Date(),
-            block_auto_merge: true  // ⭐ Bloqueia auto-merge
+            block_auto_merge: true
           }
         },
         { upsert: true }
@@ -495,16 +495,14 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
 
   // ── MESCLAR PRODUTOS (PADRÃO) ──────────────────────────────────────────────
   // Antes de mesclar, verifica se algum dos produtos está bloqueado
-  if (!action) {
-    for (const desc of descricoes) {
-      const dNorm = normalizeProductName(desc);
-      const product = await products.findOne({ nome_normalizado: dNorm });
-      if (product && product.block_auto_merge === true) {
-        return res.status(409).json({
-          blocked: true,
-          message: `Produto "${desc}" está bloqueado para mesclagem automática. Mescle manualmente se desejar.`
-        });
-      }
+  for (const desc of descricoes) {
+    const dNorm = normalizeProductName(desc);
+    const product = await products.findOne({ nome_normalizado: dNorm });
+    if (product && product.block_auto_merge === true) {
+      return res.status(409).json({
+        blocked: true,
+        error: `Produto "${desc}" está bloqueado para mesclagem automática. Mescle manualmente se desejar.`
+      });
     }
   }
 
@@ -518,7 +516,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
         nome_original: nomeFinal,
         nome_normalizado: nomeFinalNorm,
         updatedAt: new Date(),
-        block_auto_merge: false  // ⭐ Desbloqueia (caso estivesse bloqueado)
+        block_auto_merge: false
       },
       $setOnInsert: { createdAt: new Date(), codigo: null }
     },
