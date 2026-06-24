@@ -33,9 +33,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
-  // Mescla automaticamente, em sequência, todos os grupos de duplicados que o
-  // Fuse.js encontrar dentro da lista de sugestões. Roda silenciosamente — se
-  // alguma chamada falhar, simplesmente para e segue com o que já tem.
   async function autoMesclar(lista) {
     let atual = lista;
     let alguemFoiMesclado = false;
@@ -51,10 +48,12 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         });
         alguemFoiMesclado = true;
       } catch {
-        break; // não trava a busca por causa de uma falha na mesclagem automática
+        break;
       }
 
+      // Remove apenas os itens duplicados, mantendo o âncora
       const descartar = new Set(grupo.itens.map((i) => i.descricao));
+      descartar.delete(grupo.ancora.descricao);
       atual = atual.filter((i) => !descartar.has(i.descricao));
     }
 
@@ -80,7 +79,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      // ⭐ Aplica auto-merge nos itens encontrados
       setAutoMesclando(true);
       const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
       setAutoMesclando(false);
@@ -88,7 +86,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       if (alguemFoiMesclado) {
         setMensagem({
           tone: 'success',
-          text: 'Alguns produtos foram mesclados automaticamente. Recarregue a lista para ver as alterações.'
+          text: 'Alguns produtos foram mesclados automaticamente.',
         });
         setTimeout(() => setMensagem(null), 4000);
       }
