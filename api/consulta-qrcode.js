@@ -2,12 +2,14 @@ import 'dotenv/config';
 import { load } from 'cheerio';
 import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
+import { sugerirGrupoDuplicado } from '../lib/fuzzyMerge.js';
 
-const FUZZY_THRESHOLD = 0.35; // mesmo valor usado em BuscarTab/migrate.js
+// ─── Constantes ──────────────────────────────────────────────────────────────
+const FUZZY_THRESHOLD = 0.5; // aumentado de 0.35 para 0.5
 
+// ─── Utilitários ─────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
 
-// Normaliza nome de produto: remove acentos, lowercase, colapsa espaços
 const normalizeProductName = (text = '') => {
   return text
     .normalize('NFD')
@@ -17,182 +19,157 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// Salva/atualiza produto na coleção products e retorna o productId
+// ─── Upsert produto (prioriza nome normalizado) ────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const nomeNormalizado = normalizeProductName(item.descricao);
-  const filter = item.codigo
-    ? { codigo: item.codigo }
-    : { nome_normalizado: nomeNormalizado };
 
-  const update = {
-    $setOnInsert: {
-      createdAt: new Date(),
-      codigo: item.codigo || null,
-      nome_original: item.descricao,
-      nome_normalizado: nomeNormalizado,
-    },
-    $set: {
-      updatedAt: new Date(),
-    },
+  let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
+  if (existing) {
+    await products.updateOne({ _id: existing._id }, { $set: { updatedAt: new Date() } });
+    return existing._id;
+  }
+
+  const doc = {
+    createdAt: new Date(),
+    codigo: item.codigo || null,
+    nome_original: item.descricao,
+    nome_normalizado: nomeNormalizado,
+    updatedAt: new Date(),
   };
-
-  const result = await products.findOneAndUpdate(filter, update, {
-    upsert: true,
-    returnDocument: 'after',
-  });
-
-  return result._id;
+  const result = await products.insertOne(doc);
+  return result.insertedId;
 };
 
+// ─── Criar regra de mesclagem (reutilizada) ──────────────────────────────────
+async function criarRegraEMesclar(db, item, ancora, descNorm) {
+  const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
 
-const savePurchase = async (url, resultado) => {
-  try {
-    console.log('[savePurchase] Iniciando salvamento...', { url });
-    const db = await getDb();
-    console.log('[savePurchase] Conectado ao banco');
-    const purchases   = db.collection('purchases');
-    const mergeRules  = db.collection('merge_rules');
-    const products    = db.collection('products');
+  await mergeRules.updateOne(
+    { descricao_original_normalizada: descNorm },
+    {
+      $set: {
+        descricao_original: item.descricao,
+        descricao_original_normalizada: descNorm,
+        nome_final: ancora.nome_original,
+        nome_final_normalizado: ancora.nome_normalizado,
+        product_id: ancora._id,
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
 
-    const existing = await purchases.findOne({ url });
-    if (existing) {
-      console.log('[savePurchase] URL já registrada, ignorando duplicata.');
-      return { duplicate: true };
-    }
+  await purchases.updateMany(
+    { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
+    { $set: { 'itens.$[elem].descricao_original': item.descricao } },
+    { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+  );
 
-    // Carrega todas as regras de mesclagem em memória (coleção pequena)
-    const rules = await mergeRules.find({}).toArray();
-    // Monta mapa: descricao_original_normalizada → regra
-    const rulesMap = new Map(rules.map((r) => [r.descricao_original_normalizada, r]));
+  await purchases.updateMany(
+    { 'itens.descricao': item.descricao },
+    {
+      $set: {
+        'itens.$[elem].descricao': ancora.nome_original,
+        'itens.$[elem].descricao_normalizada': ancora.nome_normalizado,
+        'itens.$[elem].product_id': ancora._id,
+      },
+    },
+    { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+  );
+}
 
-    // ── FUZZY MATCH (Fuse.js) ────────────────────────────────────────────────
-    // Carrega produtos existentes (exceto bloqueados) para tentar casar, por
-    // similaridade, descrições NUNCA vistas antes com um produto já existente
-    // (ex: "ARROZ TIO JOAO 5KG" vs "ARROZ TIPO 1 TIO JOAO 5000G"). Isso evita
-    // que cada variação de escrita crie um produto novo, sem precisar de
-    // mesclagem manual.
-    const produtosExistentes = await products
-      .find({ block_auto_merge: { $ne: true } })
-      .toArray();
+// ─── Auto-merge usando clusterização (igual ao frontend) ────────────────────
+async function autoMergeNovosItens(db, itensNovos) {
+  const products = db.collection('products');
+  const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
 
-    const produtosPorNomeNorm = new Map(produtosExistentes.map((p) => [p.nome_normalizado, p]));
-    const produtosPorCodigo   = new Map(
-      produtosExistentes.filter((p) => p.codigo).map((p) => [p.codigo, p])
-    );
+  // Pré-calcular contagem de compras para todos os produtos
+  const pipeline = [
+    { $unwind: '$itens' },
+    { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
+  ];
+  const contagem = await purchases.aggregate(pipeline).toArray();
+  const mapContagem = new Map(contagem.map(c => [c._id.toString(), c.vezes]));
 
-    const fuse = new Fuse(produtosExistentes, {
-      keys: ['nome_normalizado'],
-      includeScore: true,
+  for (const item of itensNovos) {
+    const descNorm = normalizeProductName(item.descricao);
+
+    // Já existe regra?
+    const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
+    if (existingRule) continue;
+
+    const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
+    if (!produtoAtual) continue;
+
+    // Busca todos os produtos (exceto bloqueados e o atual)
+    const allProducts = await products.find({
+      _id: { $ne: produtoAtual._id },
+      block_auto_merge: { $ne: true }
+    }).toArray();
+
+    if (allProducts.length === 0) continue;
+
+    // Filtro fuzzy para encontrar candidatos similares (threshold 0.5)
+    const fuse = new Fuse(allProducts, {
+      keys: ['nome_original', 'nome_normalizado'],
       threshold: FUZZY_THRESHOLD,
+      includeScore: true,
       ignoreLocation: true,
     });
+    const candidatos = fuse.search(item.descricao)
+      .filter(r => r.score <= FUZZY_THRESHOLD)
+      .map(r => r.item);
 
-    // Cria (ou reaproveita) a regra de mesclagem e devolve os dados já
-    // enriquecidos do item, apontando para o produto canônico encontrado.
-    const aplicarFuzzyMerge = async (item, nomeNorm, produtoCanonico) => {
-      console.log(
-        `[savePurchase] Fuzzy-merge: "${item.descricao}" → "${produtoCanonico.nome_original}"`
+    if (candidatos.length === 0) continue;
+
+    // Monta lista para clusterização (inclui o produto atual)
+    const listaParaCluster = [
+      {
+        descricao: produtoAtual.nome_original,
+        descricao_normalizada: produtoAtual.nome_normalizado,
+        _id: produtoAtual._id,
+        vezes: mapContagem.get(produtoAtual._id.toString()) || 0
+      },
+      ...candidatos.map(p => ({
+        descricao: p.nome_original,
+        descricao_normalizada: p.nome_normalizado,
+        _id: p._id,
+        vezes: mapContagem.get(p._id.toString()) || 0
+      }))
+    ];
+
+    // Executa clusterização (threshold 0.5)
+    const grupo = sugerirGrupoDuplicado(listaParaCluster, 0.5);
+    if (!grupo) continue;
+
+    const itemNoGrupo = grupo.itens.some(i => i._id.toString() === produtoAtual._id.toString());
+    if (!itemNoGrupo) continue;
+
+    const ancora = grupo.ancora;
+    if (ancora._id.toString() === produtoAtual._id.toString()) continue;
+
+    // Mescla todos os itens do grupo (exceto a âncora)
+    for (const itemDoGrupo of grupo.itens) {
+      if (itemDoGrupo._id.toString() === ancora._id.toString()) continue;
+
+      const descOriginal = itemDoGrupo.descricao;
+      const descNormItem = normalizeProductName(descOriginal);
+
+      await criarRegraEMesclar(db, { descricao: descOriginal }, ancora, descNormItem);
+
+      await products.updateOne(
+        { _id: itemDoGrupo._id },
+        { $set: { block_auto_merge: true } }
       );
-      await mergeRules.updateOne(
-        { descricao_original_normalizada: nomeNorm },
-        {
-          $set: {
-            descricao_original:             item.descricao,
-            descricao_original_normalizada: nomeNorm,
-            nome_final:                     produtoCanonico.nome_original,
-            nome_final_normalizado:         produtoCanonico.nome_normalizado,
-            product_id:                     produtoCanonico._id,
-            origem:                         'fuzzy',
-            updatedAt:                      new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
-        },
-        { upsert: true }
-      );
-
-      return {
-        ...item,
-        descricao_original:    item.descricao,
-        descricao:              produtoCanonico.nome_original,
-        descricao_normalizada:  produtoCanonico.nome_normalizado,
-        product_id:             produtoCanonico._id,
-      };
-    };
-
-    let fuzzyMergedCount = 0;
-
-    const itensEnriquecidos = await Promise.all(
-      resultado.itens.map(async (item) => {
-        const nomeNorm = normalizeProductName(item.descricao);
-        const rule     = rulesMap.get(nomeNorm);
-
-        if (rule) {
-          // ── AUTO-MERGE: produto conhecido com regra de mesclagem ──────────
-          console.log(`[savePurchase] Auto-merge: "${item.descricao}" → "${rule.nome_final}"`);
-          return {
-            ...item,
-            descricao_original:       item.descricao,        // preserva o original
-            descricao:                rule.nome_final,        // aplica o nome mesclado
-            descricao_normalizada:    rule.nome_final_normalizado,
-            product_id:               rule.product_id,
-          };
-          // ─────────────────────────────────────────────────────────────────
-        }
-
-        // ── FUZZY-MERGE: nome nunca visto, mas parecido com produto existente ──
-        // O código do SEFAZ é interno de cada loja — duas lojas raramente usam
-        // o mesmo código pro mesmo produto. Por isso só pulamos o fuzzy quando
-        // o código deste item já corresponde a um produto conhecido (aí o
-        // fluxo padrão por código já resolve); ou quando o nome normalizado já
-        // existe exatamente igual (idem, fluxo padrão resolve).
-        const codigoJaConhecido = item.codigo && produtosPorCodigo.has(item.codigo);
-
-        if (!codigoJaConhecido && !produtosPorNomeNorm.has(nomeNorm)) {
-          const achados = fuse
-            .search(nomeNorm)
-            .filter((r) => r.score <= FUZZY_THRESHOLD)
-            .sort((a, b) => a.score - b.score);
-
-          if (achados.length > 0) {
-            fuzzyMergedCount++;
-            return aplicarFuzzyMerge(item, nomeNorm, achados[0].item);
-          }
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
-        // Fluxo padrão: upsert normal
-        const productId = await upsertProduct(db, item);
-        return {
-          ...item,
-          descricao_normalizada: nomeNorm,
-          product_id: productId,
-        };
-      })
-    );
-
-    const purchase = {
-      url,
-      createdAt: new Date(),
-      emitente: resultado.emitente,
-      nota: resultado.nota,
-      chave_acesso: resultado.chave_acesso,
-      totais: resultado.totais,
-      itens: itensEnriquecidos,
-    };
-
-    const result = await purchases.insertOne(purchase);
-    console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
-
-    const autoMerged = itensEnriquecidos.filter((i) => i.descricao_original).length;
-    return { duplicate: false, auto_merged: autoMerged, fuzzy_merged: fuzzyMergedCount };
-  } catch (error) {
-    console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
-    throw error;
+    }
   }
-};
+}
 
-
+// ─── Funções auxiliares de parsing (mantidas) ──────────────────────────────
 function parseValorNum(valor) {
   if (!valor) return null;
   const limpo = String(valor)
@@ -207,7 +184,7 @@ function calcPrecoUnitario(valor_total, quantidade) {
   const vt = parseValorNum(valor_total);
   const qt = parseValorNum(String(quantidade).replace(',', '.'));
   if (!vt || !qt || qt === 0) return null;
-  return Math.round((vt / qt) * 100) / 100; // 2 casas
+  return Math.round((vt / qt) * 100) / 100;
 }
 
 const extractTableRow = ($table, $) => {
@@ -293,8 +270,81 @@ const parseHtml = (html) => {
   };
 };
 
+// ─── Salvar compra (com auto-merge pós-inserção) ──────────────────────────
+const savePurchase = async (url, resultado) => {
+  try {
+    console.log('[savePurchase] Iniciando salvamento...', { url });
+    const db = await getDb();
+    const purchases = db.collection('purchases');
+
+    const existing = await purchases.findOne({ url });
+    if (existing) {
+      console.log('[savePurchase] URL já registrada, ignorando duplicata.');
+      return { duplicate: true };
+    }
+
+    // Guarda os itens originais para o auto-merge posterior
+    const itensOriginais = resultado.itens.map(item => ({ ...item }));
+
+    // Processa cada item: aplica regras existentes ou faz upsert
+    const mergeRules = db.collection('merge_rules');
+    const regras = await mergeRules.find({}).toArray();
+    const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
+
+    const itensEnriquecidos = await Promise.all(
+      resultado.itens.map(async (item) => {
+        const normOriginal = normalizeProductName(item.descricao);
+        const regra = mapRegras.get(normOriginal);
+        
+        let descricaoFinal = item.descricao;
+        let descricaoNormFinal = normOriginal;
+        let productId = null;
+        let descOriginalPreservada = undefined;
+
+        if (regra) {
+          descricaoFinal = regra.nome_final;
+          descricaoNormFinal = regra.nome_final_normalizado;
+          productId = regra.product_id;
+          descOriginalPreservada = item.descricao;
+        } else {
+          productId = await upsertProduct(db, item);
+        }
+
+        return {
+          ...item,
+          descricao: descricaoFinal,
+          descricao_normalizada: descricaoNormFinal,
+          product_id: productId,
+          ...(descOriginalPreservada && { descricao_original: descOriginalPreservada })
+        };
+      })
+    );
+
+    const purchase = {
+      url,
+      createdAt: new Date(),
+      emitente: resultado.emitente,
+      nota: resultado.nota,
+      chave_acesso: resultado.chave_acesso,
+      totais: resultado.totais,
+      itens: itensEnriquecidos,
+    };
+
+    await purchases.insertOne(purchase);
+    console.log('[savePurchase] Documento inserido com sucesso.');
+
+    // 🔥 AUTO-MERGE usando clusterização (igual ao frontend)
+    await autoMergeNovosItens(db, itensOriginais);
+
+    return { duplicate: false };
+  } catch (error) {
+    console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
+    throw error;
+  }
+};
+
+// ─── Handler Vercel ─────────────────────────────────────────────────────────
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -304,7 +354,6 @@ export default async function handler(req, res) {
   }
 
   const url = req.method === 'POST' ? req.body?.url : req.query?.url;
-  
   console.log(`[${req.method} /api/consulta-qrcode] Requisição recebida:`, { url });
 
   if (!url) {
@@ -318,7 +367,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Fetch the SEFAZ page
     const response = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
     });
@@ -330,17 +378,12 @@ export default async function handler(req, res) {
     const html = await response.text();
     const resultado = parseHtml(html);
     
-    // Save to MongoDB
     const saveResult = await savePurchase(url, resultado);
     if (saveResult?.duplicate) {
       return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
     }
 
-    return res.json({
-      ...resultado,
-      auto_merged: saveResult?.auto_merged ?? 0,
-      fuzzy_merged: saveResult?.fuzzy_merged ?? 0,
-    });
+    return res.json(resultado);
   } catch (err) {
     console.error(`[${req.method} /api/consulta-qrcode] Erro:`, err.message);
     return res.status(500).json({ error: 'Erro interno', details: err.message });
