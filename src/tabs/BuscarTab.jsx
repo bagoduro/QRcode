@@ -115,6 +115,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
               termo={sugestoes.termo}
               isLoggedIn={isLoggedIn}
               onEscolher={(descricao) => mostrarHistoricoProduto(descricao)}
+              onConcluido={() => buscarPorTermo(sugestoes.termo)}
               setMensagem={setMensagem}
               setError={setError}
             />
@@ -143,7 +144,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   );
 }
 
-function Sugestoes({ lista, termo, isLoggedIn, onEscolher, setMensagem, setError }) {
+function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensagem, setError }) {
   const [modoMesclar, setModoMesclar] = useState(false);
   const [selecionados, setSelecionados] = useState(new Set());
   const [nomeFinal, setNomeFinal] = useState('');
@@ -181,9 +182,9 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, setMensagem, setError
         tone: 'success',
         text: `"${data.nome_final}" criado — ${data.produtos_mesclados} produtos mesclados em ${data.notas_atualizadas} nota(s).`,
       });
+      setTimeout(() => onConcluido?.(), 900);
     } catch (err) {
       setError(err.message);
-    } finally {
       setMesclando(false);
     }
   }
@@ -193,9 +194,9 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, setMensagem, setError
     try {
       const data = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: lista[0].descricao });
       setMensagem({ tone: 'success', text: `Mesclagem de "${termo}" desfeita. ${data.itens_restaurados} itens restaurados.` });
+      setTimeout(() => onConcluido?.(), 900);
     } catch (err) {
       setError('Não foi possível desfazer: ' + err.message);
-    } finally {
       setDesfazendo(false);
     }
   }
