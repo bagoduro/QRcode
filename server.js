@@ -456,9 +456,14 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const resAgg = await purchases.aggregate(pipeline).toArray();
     if (resAgg.length === 0) return res.status(404).json({ error: 'Não encontrado' });
 
-    for (const desc of resAgg[0].originais) {
+    const originais = resAgg[0].originais;
+    for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
-      await products.updateOne({ nome_normalizado: dNorm }, { $set: { nome_original: desc, nome_normalizado: dNorm, updatedAt: new Date() } }, { upsert: true });
+      await products.updateOne(
+        { nome_normalizado: dNorm },
+        { $set: { nome_original: desc, nome_normalizado: dNorm, updatedAt: new Date() } },
+        { upsert: true }
+      );
       const p = await products.findOne({ nome_normalizado: dNorm });
       await purchases.updateMany(
         { 'itens.descricao': descricao_mesclada, 'itens.descricao_original': desc },
@@ -477,18 +482,21 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const nomeFinalNorm = normalizeProductName(descricao_mesclada);
     await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
-    //  Adiciona à blacklist para impedir auto-merge futuro
-    await blacklistCol.updateOne(
-      { nome_final_normalizado: nomeFinalNorm },
-      {
-        $set: {
-          nome_final_normalizado: nomeFinalNorm,
-          atualizado_em: new Date(),
+    // Insere cada ORIGINAL na blacklist (para bloquear auto-merge futuro)
+    for (const desc of originais) {
+      const dNorm = normalizeProductName(desc);
+      await blacklistCol.updateOne(
+        { nome_final_normalizado: dNorm },
+        {
+          $set: {
+            nome_final_normalizado: dNorm,
+            atualizado_em: new Date(),
+          },
+          $setOnInsert: { criado_em: new Date() },
         },
-        $setOnInsert: { criado_em: new Date() },
-      },
-      { upsert: true }
-    );
+        { upsert: true }
+      );
+    }
 
     return res.json({ ok: true });
   }
@@ -543,8 +551,11 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     }
   }
 
-  //  Remove da blacklist (pois o usuário mesclou manualmente)
-  await blacklistCol.deleteOne({ nome_final_normalizado: nomeFinalNorm });
+  // Remove da blacklist TODOS os originais que foram mesclados manualmente
+  for (const desc of descricoes) {
+    const dNorm = normalizeProductName(desc);
+    await blacklistCol.deleteOne({ nome_final_normalizado: dNorm });
+  }
 
   return res.json({ ok: true });
 });
