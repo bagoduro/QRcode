@@ -83,6 +83,86 @@ const parseItemRow = (row, $) => {
   };
 };
 
+// ─── NOVA FUNÇÃO: auto‑merge de itens novos ──────────────────────────────────
+async function autoMergeNewItems(db, itensNovos) {
+  const products = db.collection('products');
+  const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
+
+  for (const item of itensNovos) {
+    const descNorm = normalizeProductName(item.descricao);
+
+    // 1. Verifica se já existe regra para este item (pula se já tiver)
+    const existingRule = await mergeRules.findOne({
+      descricao_original_normalizada: descNorm
+    });
+    if (existingRule) continue;
+
+    // 2. Busca todos os produtos (exceto ele mesmo) e verifica se algum é similar
+    const allProducts = await products.find({
+      nome_normalizado: { $ne: descNorm }
+    }).toArray();
+
+    // Filtra produtos bloqueados (block_auto_merge: true) – não mescla com bloqueados
+    const candidatos = allProducts.filter(p => p.block_auto_merge !== true);
+
+    if (candidatos.length === 0) continue;
+
+    const fuse = new Fuse(candidatos, {
+      keys: ['nome_original', 'nome_normalizado'],
+      threshold: 0.4,
+      includeScore: true,
+      ignoreLocation: true,
+    });
+
+    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.4);
+
+    if (similares.length > 0) {
+      // Pega o mais similar como âncora
+      const ancora = similares[0].item;
+      const descricoesParaMesclar = [item.descricao, ancora.nome_original];
+
+      // Cria regra de mesclagem para o item novo
+      await mergeRules.updateOne(
+        { descricao_original_normalizada: descNorm },
+        {
+          $set: {
+            descricao_original: item.descricao,
+            descricao_original_normalizada: descNorm,
+            nome_final: ancora.nome_original,
+            nome_final_normalizado: ancora.nome_normalizado,
+            product_id: ancora._id,
+            updatedAt: new Date(),
+          },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true }
+      );
+
+      // Atualiza as compras antigas que tenham esse item (sem descricao_original)
+      await purchases.updateMany(
+        { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
+        { $set: { 'itens.$[elem].descricao_original': item.descricao } },
+        { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+      );
+      // Atualiza todas as ocorrências desse item para o nome final
+      await purchases.updateMany(
+        { 'itens.descricao': item.descricao },
+        {
+          $set: {
+            'itens.$[elem].descricao': ancora.nome_original,
+            'itens.$[elem].descricao_normalizada': ancora.nome_normalizado,
+            'itens.$[elem].product_id': ancora._id,
+          },
+        },
+        { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+      );
+
+      console.log(`[autoMergeNewItems] Item "${item.descricao}" mesclado com "${ancora.nome_original}"`);
+    }
+  }
+}
+
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
@@ -95,6 +175,9 @@ const savePurchase = async (url, resultado) => {
       console.log('[savePurchase] URL já registrada, ignorando duplicata.');
       return { duplicate: true };
     }
+
+    // Guarda os itens originais (antes de aplicar regras) para o auto‑merge posterior
+    const itensOriginais = resultado.itens.map(item => ({ ...item }));
 
     const regras = await mergeRules.find({}).toArray();
     const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
@@ -140,6 +223,10 @@ const savePurchase = async (url, resultado) => {
 
     const result = await purchases.insertOne(purchase);
     console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
+
+    // ─── AUTO‑MERGE DE ITENS NOVOS ──────────────────────────────────────────
+    await autoMergeNewItems(db, itensOriginais);
+
     return { duplicate: false };
   } catch (error) {
     console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
@@ -547,7 +634,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
         nome_original: nomeFinal,
         nome_normalizado: nomeFinalNorm,
         updatedAt: new Date(),
-        block_auto_merge: true   // <-- agora bloqueia
+        block_auto_merge: true
       },
       $setOnInsert: { createdAt: new Date(), codigo: null }
     },
