@@ -7,9 +7,14 @@ import { formatData } from '../lib/format';
 export default function MesclagensTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
   const [mesclagens, setMesclagens] = useState(null);
   const [pendingUndo, setPendingUndo] = useState(null); // { nome_final }
   const [undoingNome, setUndoingNome] = useState(null);
+  
+  // Estados para a nova interface de consolidação
+  const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
+  const [migrateSecret, setMigrateSecret] = useState('');
   const [consolidando, setConsolidando] = useState(false);
 
   async function carregar() {
@@ -27,6 +32,10 @@ export default function MesclagensTab() {
 
   useEffect(() => {
     carregar();
+    // Tenta pegar o secret da URL inicialmente
+    const urlParams = new URLSearchParams(window.location.search);
+    const secret = urlParams.get('secret');
+    if (secret) setMigrateSecret(secret);
   }, []);
 
   async function confirmarDesfazer() {
@@ -37,6 +46,8 @@ export default function MesclagensTab() {
     try {
       await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: nome_final });
       setMesclagens((prev) => prev.filter((m) => m.nome_final !== nome_final));
+      setSuccess('Mesclagem desfeita com sucesso.');
+      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -44,26 +55,21 @@ export default function MesclagensTab() {
     }
   }
 
-  async function consolidarBanco() {
-    if (!confirm('Isso vai varrer todo o banco em busca de nomes similares e mesclá-los automaticamente. Deseja continuar?')) return;
-    
+  async function executarConsolidacao() {
+    if (!migrateSecret) {
+      setError('Por favor, informe a senha para continuar.');
+      return;
+    }
+
     setConsolidando(true);
     setError(null);
+    setSuccess(null);
+    setShowMigrateConfirm(false);
+
     try {
-      // Tenta obter o secret da URL
-      const urlParams = new URLSearchParams(window.location.search);
-      let secret = urlParams.get('secret');
-      
-      // Se não houver secret na URL, pede ao usuário
-      if (!secret) {
-        secret = prompt('Por favor, informe a senha (MIGRATE_SECRET) para consolidar o banco:');
-      }
-      
-      if (!secret) return; // Usuário cancelou
-      
-      const res = await apiPost(`/migrate?secret=${encodeURIComponent(secret)}`);
+      const res = await apiPost(`/migrate?secret=${encodeURIComponent(migrateSecret)}`);
       if (res.ok) {
-        alert(`Sucesso! ${res.grupos_mesclados || 0} grupos de produtos foram unificados.`);
+        setSuccess(`Sucesso! ${res.grupos_mesclados || 0} grupos de produtos foram unificados.`);
         carregar();
       }
     } catch (err) {
@@ -88,7 +94,7 @@ export default function MesclagensTab() {
           </button>
           <button 
             className="btn btn-secondary" 
-            onClick={consolidarBanco}
+            onClick={() => setShowMigrateConfirm(true)}
             disabled={consolidando}
             style={{ flex: 1 }}
           >
@@ -97,12 +103,44 @@ export default function MesclagensTab() {
           </button>
         </div>
 
+        {/* Interface Integrada de Senha/Confirmação */}
+        {showMigrateConfirm && (
+          <div className="alert alert-info" style={{ marginBottom: '20px', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '15px' }}>
+            <h4 style={{ marginTop: 0, marginBottom: '10px' }}>Consolidar Banco</h4>
+            <p style={{ fontSize: '0.9rem', marginBottom: '15px' }}>
+              Isso vai varrer todo o banco em busca de nomes similares e mesclá-los automaticamente.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold' }}>Senha de Segurança (MIGRATE_SECRET):</label>
+              <input 
+                type="password" 
+                className="input" 
+                placeholder="Digite a senha..."
+                value={migrateSecret}
+                onChange={(e) => setMigrateSecret(e.target.value)}
+                style={{ width: '100%', padding: '8px' }}
+              />
+              <div style={{ display: 'flex', gap: '10px', marginTop: '5px' }}>
+                <button className="btn btn-primary" onClick={executarConsolidacao} style={{ flex: 1 }}>
+                  Confirmar e Iniciar
+                </button>
+                <button className="btn btn-ghost" onClick={() => setShowMigrateConfirm(false)} style={{ flex: 1 }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="result-area">
           {loading && <Loading text="Carregando mesclagens..." />}
           {!loading && error && <Alert tone="danger">{error}</Alert>}
+          {!loading && success && <Alert tone="success">{success}</Alert>}
+          
           {!loading && mesclagens && mesclagens.length === 0 && (
             <EmptyState icon="ti-git-merge" text="Nenhum produto mesclado ainda." />
           )}
+          
           {!loading && mesclagens && mesclagens.length > 0 && (
             <div className="item-list">
               {mesclagens.map((m) => (
