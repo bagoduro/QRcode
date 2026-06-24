@@ -430,9 +430,29 @@ app.get('/api/auth', authHandler);
 app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
-    // Busca produtos com block_auto_merge = true
     const blocked = await db.collection('products').find({ block_auto_merge: true }).toArray();
     res.json({ itens: blocked.map(b => b.nome_normalizado) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ENDPOINT PARA ALTERNAR BLOQUEIO MANUALMENTE ──────────────────────────
+app.post('/api/toggle-block', requireAuth, async (req, res) => {
+  const { nome_normalizado, blocked } = req.body;
+  if (!nome_normalizado) {
+    return res.status(400).json({ error: 'Faltando "nome_normalizado"' });
+  }
+  try {
+    const db = await getDb();
+    const result = await db.collection('products').updateOne(
+      { nome_normalizado },
+      { $set: { block_auto_merge: blocked === true } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+    res.json({ ok: true, blocked: blocked === true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -465,7 +485,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
     const originais = resAgg[0].originais;
     for (const desc of originais) {
       const dNorm = normalizeProductName(desc);
-      // Restaura o produto original e marca como bloqueado para auto-merge
+      // Restaura o produto original e **libera** para auto-merge (block_auto_merge = false)
       await products.updateOne(
         { nome_normalizado: dNorm },
         {
@@ -473,7 +493,7 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
             nome_original: desc,
             nome_normalizado: dNorm,
             updatedAt: new Date(),
-            block_auto_merge: true
+            block_auto_merge: false   // <-- ALTERAÇÃO: agora libera em vez de bloquear
           }
         },
         { upsert: true }
@@ -500,11 +520,9 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
   }
 
   // ── MESCLAR PRODUTOS (PADRÃO) ──────────────────────────────────────────────
-  // Antes de mesclar, verifica se algum dos produtos está bloqueado
   if (autoMerge) {
     for (const desc of descricoes) {
       const dNorm = normalizeProductName(desc);
-
       const product = await products.findOne({
         nome_normalizado: dNorm
       });

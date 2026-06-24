@@ -14,6 +14,7 @@ export default function MesclagensTab() {
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
   const [migrateSecret, setMigrateSecret] = useState('');
   const [consolidando, setConsolidando] = useState(false);
+  const [desbloqueando, setDesbloqueando] = useState(null);
 
   async function carregar() {
     setLoading(true);
@@ -44,7 +45,6 @@ export default function MesclagensTab() {
       await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: nome_final });
       setSuccess('Mesclagem desfeita com sucesso.');
       setTimeout(() => setSuccess(null), 3000);
-      // Recarrega a lista inteira do backend
       await carregar();
     } catch (err) {
       setError(err.message);
@@ -53,17 +53,32 @@ export default function MesclagensTab() {
     }
   }
 
+  async function toggleBlock(mesclagem, blocked) {
+    setDesbloqueando(mesclagem.nome_final_normalizado);
+    try {
+      await apiPost('/toggle-block', {
+        nome_normalizado: mesclagem.nome_final_normalizado,
+        blocked: blocked,
+      });
+      setSuccess(blocked ? 'Produto bloqueado para auto-merge.' : 'Produto desbloqueado para auto-merge.');
+      setTimeout(() => setSuccess(null), 3000);
+      await carregar();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDesbloqueando(null);
+    }
+  }
+
   async function executarConsolidacao() {
     if (!migrateSecret) {
       setError('Por favor, informe a senha para continuar.');
       return;
     }
-
     setConsolidando(true);
     setError(null);
     setSuccess(null);
     setShowMigrateConfirm(false);
-
     try {
       const res = await apiPost(`/migrate?secret=${encodeURIComponent(migrateSecret)}`);
       if (res.ok) {
@@ -144,6 +159,30 @@ export default function MesclagensTab() {
                 <div className="item-card mesclagem-card" key={m.nome_final}>
                   <div className="top-row">
                     <p>{m.nome_final}</p>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      {m.blocked && (
+                        <button
+                          className="btn-modo-mesclar"
+                          style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                          disabled={desbloqueando === m.nome_final_normalizado}
+                          onClick={() => toggleBlock(m, false)}
+                        >
+                          <i className={`ti ${desbloqueando === m.nome_final_normalizado ? 'ti-loader-2 spin' : 'ti-unlock'}`} aria-hidden="true" />
+                          {desbloqueando === m.nome_final_normalizado ? '...' : 'Desbloquear'}
+                        </button>
+                      )}
+                      {!m.blocked && (
+                        <button
+                          className="btn-modo-mesclar"
+                          style={{ color: 'var(--text-secondary)' }}
+                          disabled={desbloqueando === m.nome_final_normalizado}
+                          onClick={() => toggleBlock(m, true)}
+                        >
+                          <i className={`ti ${desbloqueando === m.nome_final_normalizado ? 'ti-loader-2 spin' : 'ti-lock'}`} aria-hidden="true" />
+                          {desbloqueando === m.nome_final_normalizado ? '...' : 'Bloquear'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="meta">
                     {m.origens.length} nome{m.origens.length !== 1 ? 's' : ''} original

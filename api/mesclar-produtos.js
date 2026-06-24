@@ -57,7 +57,6 @@ export default async function handler(req, res) {
     const products     = db.collection('products');
     const mergeRules   = db.collection('merge_rules');
 
-    // Utilitário de normalização
     const norm = (text = '') =>
       text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -67,7 +66,6 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
       }
 
-      // 1. Encontrar a regra principal
       let regra = await mergeRules.findOne({ nome_final: descricao_mesclada });
       if (!regra) {
         const descNorm = norm(descricao_mesclada);
@@ -79,7 +77,6 @@ export default async function handler(req, res) {
 
       const nomeFinalNorm = regra.nome_final_normalizado;
 
-      // 2. Buscar todas as regras deste grupo
       const todasRegras = await mergeRules.find({ nome_final_normalizado: nomeFinalNorm }).toArray();
       if (todasRegras.length === 0) {
         return res.status(404).json({ error: 'Nenhuma regra de mesclagem encontrada para este grupo.' });
@@ -88,12 +85,10 @@ export default async function handler(req, res) {
       let totalRestaurados = 0;
       const originaisRecuperados = [];
 
-      // 3. Para cada regra, restaurar os itens correspondentes
       for (const r of todasRegras) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
-        // Recriar o produto original
         await products.updateOne(
           { nome_normalizado: descOriginalNorm },
           {
@@ -102,13 +97,13 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
+              block_auto_merge: false   // <-- ALTERAÇÃO: libera para auto-merge
             },
           },
           { upsert: true }
         );
         const prodOriginal = await products.findOne({ nome_normalizado: descOriginalNorm });
 
-        // Atualizar os itens que têm este descricao_original e a descrição atual é o nome final
         const updateResult = await purchases.updateMany(
           {
             'itens.descricao_original': descOriginal,
@@ -130,7 +125,6 @@ export default async function handler(req, res) {
         originaisRecuperados.push(descOriginal);
       }
 
-      // 4. Remover todas as regras deste grupo
       await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
       return res.json({
@@ -160,6 +154,7 @@ export default async function handler(req, res) {
           nome_original: nomeFinal,
           nome_normalizado: nomeFinalNorm,
           updatedAt: new Date(),
+          block_auto_merge: false
         },
       },
       { upsert: true }
@@ -198,7 +193,6 @@ export default async function handler(req, res) {
       nome_normalizado: { $in: descNormsAntigas },
     });
 
-    // ── SALVAR REGRAS DE AUTO-MERGE ──────────────────────────────────────────
     const descricoesSemFinal = descricoes.filter((d) => norm(d) !== nomeFinalNorm);
     for (const descOriginal of descricoesSemFinal) {
       const descOrigNorm = norm(descOriginal);
