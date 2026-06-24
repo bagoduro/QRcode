@@ -4,7 +4,7 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.35; // mantido como original
+const FUZZY_THRESHOLD = 0.7; // aumentado para 0.7
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -19,7 +19,6 @@ const normalizeProductName = (text = '') => {
 };
 
 // ─── FUNÇÃO DE CLUSTERIZAÇÃO (COPIADA DO FUZZYMERGE.JS) ───────────────────
-// Isso evita o erro de módulo não encontrado
 function sugerirGrupoDuplicado(lista, threshold = 0.4) {
   if (!lista || lista.length < 2) return null;
 
@@ -156,15 +155,15 @@ async function autoMergeNovosItens(db, itensNovos) {
 
       if (allProducts.length === 0) continue;
 
-      // Filtro fuzzy para candidatos (threshold 0.4, igual ao frontend)
+      // 🔥 THRESHOLD AUMENTADO PARA 0.7
       const fuse = new Fuse(allProducts, {
         keys: ['nome_original', 'nome_normalizado'],
-        threshold: 0.4,
+        threshold: 0.7,
         includeScore: true,
         ignoreLocation: true,
       });
       const candidatos = fuse.search(item.descricao)
-        .filter(r => r.score <= 0.4)
+        .filter(r => r.score <= 0.7)
         .map(r => r.item);
 
       if (candidatos.length === 0) continue;
@@ -184,7 +183,8 @@ async function autoMergeNovosItens(db, itensNovos) {
         }))
       ];
 
-      const grupo = sugerirGrupoDuplicado(listaParaCluster, 0.5);
+      // 🔥 THRESHOLD AUMENTADO PARA 0.7
+      const grupo = sugerirGrupoDuplicado(listaParaCluster, 0.7);
       if (!grupo) continue;
 
       const itemNoGrupo = grupo.itens.some(i => i._id.toString() === produtoAtual._id.toString());
@@ -209,7 +209,7 @@ async function autoMergeNovosItens(db, itensNovos) {
   }
 }
 
-// ─── SALVAR COMPRA (COM AUTO-MERGE PÓS-INSERÇÃO) ──────────────────────────
+// ─── SALVAR COMPRA (COM AUTO-MERGE PÓS-INSERÇÃO E LOGS) ──────────────────
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
@@ -232,15 +232,18 @@ const savePurchase = async (url, resultado) => {
     const rules = await mergeRules.find({}).toArray();
     const rulesMap = new Map(rules.map(r => [r.descricao_original_normalizada, r]));
 
-    // Produtos existentes para fuzzy-merge (original)
+    // Produtos existentes para fuzzy-merge
     const produtosExistentes = await products.find({ block_auto_merge: { $ne: true } }).toArray();
+    console.log('[savePurchase] TOTAL PRODUTOS CARREGADOS:', produtosExistentes.length);
+
     const produtosPorNomeNorm = new Map(produtosExistentes.map(p => [p.nome_normalizado, p]));
     const produtosPorCodigo = new Map(
       produtosExistentes.filter(p => p.codigo).map(p => [p.codigo, p])
     );
 
+    // 🔥 THRESHOLD 0.7 (já está usando FUZZY_THRESHOLD)
     const fuse = new Fuse(produtosExistentes, {
-      keys: ['nome_normalizado'],
+      keys: ['nome_original', 'nome_normalizado'],
       includeScore: true,
       threshold: FUZZY_THRESHOLD,
       ignoreLocation: true,
@@ -254,7 +257,7 @@ const savePurchase = async (url, resultado) => {
         const rule = rulesMap.get(nomeNorm);
 
         if (rule) {
-          console.log(`[savePurchase] Auto-merge: "${item.descricao}" → "${rule.nome_final}"`);
+          console.log(`[savePurchase] Auto-merge (regra): "${item.descricao}" → "${rule.nome_final}"`);
           return {
             ...item,
             descricao_original: item.descricao,
@@ -266,14 +269,26 @@ const savePurchase = async (url, resultado) => {
 
         const codigoJaConhecido = item.codigo && produtosPorCodigo.has(item.codigo);
         if (!codigoJaConhecido && !produtosPorNomeNorm.has(nomeNorm)) {
+          // 🔥 LOG: termo pesquisado
+          console.log('[savePurchase] PROCURANDO:', nomeNorm);
+
           const achados = fuse.search(nomeNorm)
             .filter(r => r.score <= FUZZY_THRESHOLD)
             .sort((a, b) => a.score - b.score);
 
+          // 🔥 LOG: primeiros 10 resultados
+          console.log(
+            '[savePurchase] RESULTADOS (top 10):',
+            achados.slice(0, 10).map(a => ({
+              nome: a.item.nome_original,
+              score: a.score
+            }))
+          );
+
           if (achados.length > 0) {
             fuzzyMergedCount++;
             const produtoCanonico = achados[0].item;
-            console.log(`[savePurchase] Fuzzy-merge: "${item.descricao}" → "${produtoCanonico.nome_original}"`);
+            console.log(`[savePurchase] Fuzzy-merge: "${item.descricao}" → "${produtoCanonico.nome_original}" (score: ${achados[0].score})`);
             await mergeRules.updateOne(
               { descricao_original_normalizada: nomeNorm },
               {
@@ -297,6 +312,8 @@ const savePurchase = async (url, resultado) => {
               descricao_normalizada: produtoCanonico.nome_normalizado,
               product_id: produtoCanonico._id,
             };
+          } else {
+            console.log('[savePurchase] Nenhum resultado para:', nomeNorm);
           }
         }
 
@@ -327,7 +344,6 @@ const savePurchase = async (url, resultado) => {
       await autoMergeNovosItens(db, itensOriginais);
     } catch (err) {
       console.error('[savePurchase] Erro no auto-merge por clusterização:', err.message);
-      // Não interrompe a resposta
     }
 
     const autoMerged = itensEnriquecidos.filter(i => i.descricao_original).length;
