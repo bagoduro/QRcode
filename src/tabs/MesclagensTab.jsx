@@ -50,7 +50,11 @@ export default function MesclagensTab() {
     setConsolidando(true);
     setError(null);
     try {
-      const res = await apiPost('/migrate');
+      // Tenta obter o secret da URL ou do localStorage para a migração
+      const urlParams = new URLSearchParams(window.location.search);
+      const secret = urlParams.get('secret') || '';
+      
+      const res = await apiPost(`/migrate${secret ? '?secret=' + secret : ''}`);
       if (res.ok) {
         alert(`Sucesso! ${res.grupos_mesclados || 0} grupos de produtos foram unificados.`);
         carregar();
