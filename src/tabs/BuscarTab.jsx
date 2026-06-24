@@ -51,6 +51,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       try {
         await apiPost('/mesclar-produtos', {
+          autoMerge: true,
           descricoes: grupo.itens.map((i) => i.descricao),
           nome_final: grupo.ancora.descricao,
         });

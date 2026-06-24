@@ -440,7 +440,13 @@ app.get('/api/auto-merge-blacklist', requireAuth, async (req, res) => {
 
 // ── ENDPOINT DE MESCLAGEM (com suporte à blacklist) ──────────────────────
 app.post('/mesclar-produtos', requireAuth, async (req, res) => {
-  const { action, descricoes, nome_final, descricao_mesclada } = req.body || {};
+  const {
+    action,
+    descricoes,
+    nome_final,
+    descricao_mesclada,
+    autoMerge = false
+  } = req.body || {};
   const db = await getDb();
   const purchases = db.collection('purchases');
   const products = db.collection('products');
@@ -495,14 +501,20 @@ app.post('/mesclar-produtos', requireAuth, async (req, res) => {
 
   // ── MESCLAR PRODUTOS (PADRÃO) ──────────────────────────────────────────────
   // Antes de mesclar, verifica se algum dos produtos está bloqueado
-  for (const desc of descricoes) {
-    const dNorm = normalizeProductName(desc);
-    const product = await products.findOne({ nome_normalizado: dNorm });
-    if (product && product.block_auto_merge === true) {
-      return res.status(409).json({
-        blocked: true,
-        error: `Produto "${desc}" está bloqueado para mesclagem automática. Mescle manualmente se desejar.`
+  if (autoMerge) {
+    for (const desc of descricoes) {
+      const dNorm = normalizeProductName(desc);
+
+      const product = await products.findOne({
+        nome_normalizado: dNorm
       });
+
+      if (product?.block_auto_merge === true) {
+        return res.status(409).json({
+          blocked: true,
+          error: `Produto "${desc}" está bloqueado para mesclagem automática.`
+        });
+      }
     }
   }
 
