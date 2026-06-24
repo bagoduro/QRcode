@@ -61,19 +61,32 @@ export default async function handler(req, res) {
     const norm = (text = '') =>
       text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-    // --- LÓGICA PARA DESFAZER MESCLAGEM ---
+    // --- LÓGICA PARA DESFAZER MESCLAGEM (CORRIGIDA) ---
     if (action === 'unmerge') {
       if (!descricao_mesclada) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
       }
 
+      // 1. Buscar a regra de mesclagem correspondente para obter o nome normalizado
+      let regra = await mergeRules.findOne({ nome_final: descricao_mesclada });
+      if (!regra) {
+        const descNorm = norm(descricao_mesclada);
+        regra = await mergeRules.findOne({ nome_final_normalizado: descNorm });
+      }
+      if (!regra) {
+        return res.status(404).json({ error: 'Regra de mesclagem não encontrada para esta descrição.' });
+      }
+
+      const nomeFinalNorm = regra.nome_final_normalizado;
+
+      // 2. Agora busca os itens que têm essa descrição normalizada (case-insensitive e sem diferenças de formatação)
       const pipeline = [
         { $unwind: '$itens' },
-        { 
-          $match: { 
-            'itens.descricao': descricao_mesclada,
+        {
+          $match: {
+            'itens.descricao_normalizada': nomeFinalNorm,
             'itens.descricao_original': { $exists: true }
-          } 
+          }
         },
         {
           $group: {
@@ -109,9 +122,9 @@ export default async function handler(req, res) {
         const prodOriginal = await products.findOne({ nome_normalizado: descNorm });
 
         const updateResult = await purchases.updateMany(
-          { 
-            'itens.descricao': descricao_mesclada, 
-            'itens.descricao_original': descOriginal 
+          {
+            'itens.descricao_normalizada': nomeFinalNorm,
+            'itens.descricao_original': descOriginal
           },
           {
             $set: {
@@ -123,14 +136,13 @@ export default async function handler(req, res) {
               'itens.$[elem].descricao_original': ""
             }
           },
-          { arrayFilters: [{ 'elem.descricao': descricao_mesclada, 'elem.descricao_original': descOriginal }] }
+          { arrayFilters: [{ 'elem.descricao_normalizada': nomeFinalNorm, 'elem.descricao_original': descOriginal }] }
         );
         totalRestaurados += updateResult.modifiedCount;
       }
 
       // Remove as regras de auto-merge referentes a esta mesclagem
-      const nomeFinalNormUnmerge = norm(descricao_mesclada);
-      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNormUnmerge });
+      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
       return res.json({
         ok: true,
@@ -198,8 +210,6 @@ export default async function handler(req, res) {
     });
 
     // ── SALVAR REGRAS DE AUTO-MERGE ──────────────────────────────────────────
-    // Para cada descrição original (exceto o próprio nome final), persistimos
-    // uma regra: "se aparecer X numa nota nova → renomear para nomeFinal"
     const descricoesSemFinal = descricoes.filter((d) => norm(d) !== nomeFinalNorm);
     for (const descOriginal of descricoesSemFinal) {
       const descOrigNorm = norm(descOriginal);
@@ -219,7 +229,6 @@ export default async function handler(req, res) {
         { upsert: true }
       );
     }
-    // ────────────────────────────────────────────────────────────────────────
 
     return res.json({
       ok: true,
