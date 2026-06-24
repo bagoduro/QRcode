@@ -121,46 +121,7 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── FUNÇÃO DE CLUSTERIZAÇÃO (MESMA DO FRONTEND) ───────────────────────────
-function sugerirGrupoDuplicado(lista, threshold = 0.4) {
-  if (!lista || lista.length < 2) return null;
-
-  const restante = [...lista];
-  let melhorGrupo = null;
-
-  while (restante.length >= 2) {
-    restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
-    const ancora = restante[0];
-
-    const fuse = new Fuse(restante, {
-      keys: ['descricao'],
-      includeScore: true,
-      threshold,
-      ignoreLocation: true,
-    });
-
-    const achados = fuse
-      .search(ancora.descricao)
-      .filter((r) => r.score <= threshold)
-      .map((r) => r.item);
-
-    if (achados.length >= 2) {
-      const grupo = { ancora, itens: achados };
-      if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
-        melhorGrupo = grupo;
-      }
-    }
-
-    const descartar = new Set([ancora.descricao, ...achados.map((i) => i.descricao)]);
-    for (let i = restante.length - 1; i >= 0; i--) {
-      if (descartar.has(restante[i].descricao)) restante.splice(i, 1);
-    }
-  }
-
-  return melhorGrupo;
-}
-
-// ─── AUTO-MERGE USANDO A MESMA LÓGICA DO FRONTEND ─────────────────────────
+// ─── AUTO-MERGE SIMPLES (BUSCA FUZZY DIRETA) ──────────────────────────────
 async function autoMergeNewItems(db, itensNovos) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
@@ -175,104 +136,44 @@ async function autoMergeNewItems(db, itensNovos) {
     });
     if (existingRule) continue;
 
-    // Busca o produto atual (já inserido pelo upsert)
+    // Busca o produto recém-criado (ou já existente)
     const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
     if (!produtoAtual) continue;
 
-    // Busca todos os produtos (exceto bloqueados) para formar a lista
+    // Busca todos os produtos (exceto bloqueados e o atual)
     const allProducts = await products.find({
+      _id: { $ne: produtoAtual._id },
       block_auto_merge: { $ne: true }
     }).toArray();
 
-    if (allProducts.length < 2) continue;
+    if (allProducts.length === 0) continue;
 
-    // Prepara a lista para o clusterizador: cada produto deve ter { descricao, vezes }
-    // Precisamos calcular 'vezes' (número de compras) para cada produto.
-    // Para isso, fazemos um aggregate nas compras ou contamos manualmente.
-    // Como é mais simples, vamos fazer um pipeline para contar as compras de cada produto.
-    const pipeline = [
-      { $unwind: '$itens' },
-      {
-        $group: {
-          _id: '$itens.product_id',
-          vezes: { $sum: 1 }
-        }
-      }
-    ];
-    const contagem = await purchases.aggregate(pipeline).toArray();
-    const mapContagem = new Map(contagem.map(c => [c._id.toString(), c.vezes]));
+    // Fuse com threshold 0.6 – comparando nome original e normalizado
+    const fuse = new Fuse(allProducts, {
+      keys: ['nome_original', 'nome_normalizado'],
+      threshold: 0.6,
+      includeScore: true,
+      ignoreLocation: true,
+    });
 
-    const lista = allProducts.map(p => ({
-      descricao: p.nome_original,
-      descricao_normalizada: p.nome_normalizado,
-      _id: p._id,
-      vezes: mapContagem.get(p._id.toString()) || 0,
-      block_auto_merge: p.block_auto_merge || false
-    }));
+    // Busca usando a descrição original do item (mais rica)
+    const resultados = fuse.search(item.descricao)
+      .filter(r => r.score <= 0.6)
+      .sort((a, b) => a.score - b.score);
 
-    // Executa a clusterização com threshold 0.5 (mesmo do frontend)
-    const grupo = sugerirGrupoDuplicado(lista, 0.5);
-    if (!grupo) continue;
+    if (resultados.length === 0) continue;
 
-    // Verifica se o item atual está no grupo
-    const itemNoGrupo = grupo.itens.some(i => i._id.toString() === produtoAtual._id.toString());
-    if (!itemNoGrupo) continue;
+    // Pega o mais similar
+    const ancora = resultados[0].item;
 
-    // A âncora é o item com mais compras
-    const ancora = grupo.ancora;
+    // Cria regra de mesclagem (já existente)
+    await criarRegraEMesclar(db, item, ancora, descNorm);
 
-    // Se a âncora já é o próprio item, não precisa mesclar (já está ok)
-    if (ancora._id.toString() === produtoAtual._id.toString()) continue;
-
-    // Mescla todos os itens do grupo (exceto a âncora) para a âncora
-    for (const itemDoGrupo of grupo.itens) {
-      if (itemDoGrupo._id.toString() === ancora._id.toString()) continue;
-
-      // Cria regra para este item
-      const descOriginal = itemDoGrupo.descricao;
-      const descNormItem = normalizeProductName(descOriginal);
-      await mergeRules.updateOne(
-        { descricao_original_normalizada: descNormItem },
-        {
-          $set: {
-            descricao_original: descOriginal,
-            descricao_original_normalizada: descNormItem,
-            nome_final: ancora.descricao,
-            nome_final_normalizado: ancora.descricao_normalizada,
-            product_id: ancora._id,
-            updatedAt: new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
-        },
-        { upsert: true }
-      );
-
-      // Atualiza compras que tenham esse item (sem descricao_original)
-      await purchases.updateMany(
-        { 'itens.descricao': descOriginal, 'itens.descricao_original': { $exists: false } },
-        { $set: { 'itens.$[elem].descricao_original': descOriginal } },
-        { arrayFilters: [{ 'elem.descricao': descOriginal }] }
-      );
-
-      // Atualiza todas as ocorrências desse item para o nome final
-      await purchases.updateMany(
-        { 'itens.descricao': descOriginal },
-        {
-          $set: {
-            'itens.$[elem].descricao': ancora.descricao,
-            'itens.$[elem].descricao_normalizada': ancora.descricao_normalizada,
-            'itens.$[elem].product_id': ancora._id,
-          },
-        },
-        { arrayFilters: [{ 'elem.descricao': descOriginal }] }
-      );
-
-      // Marca o produto antigo como bloqueado para evitar re-mesclagem
-      await products.updateOne(
-        { _id: itemDoGrupo._id },
-        { $set: { block_auto_merge: true } }
-      );
-    }
+    // Marca o produto atual como bloqueado para evitar re-mesclagem
+    await products.updateOne(
+      { _id: produtoAtual._id },
+      { $set: { block_auto_merge: true } }
+    );
   }
 }
 
@@ -577,6 +478,45 @@ app.post('/api/migrate', requireAuth, async (req, res) => {
       _id: c._id,
       vezes: c.vezes
     }));
+
+    // Função de clusterização (reutiliza a mesma lógica do frontend)
+    function sugerirGrupoDuplicado(lista, threshold = 0.4) {
+      if (!lista || lista.length < 2) return null;
+
+      const restante = [...lista];
+      let melhorGrupo = null;
+
+      while (restante.length >= 2) {
+        restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
+        const ancora = restante[0];
+
+        const fuse = new Fuse(restante, {
+          keys: ['descricao'],
+          includeScore: true,
+          threshold,
+          ignoreLocation: true,
+        });
+
+        const achados = fuse
+          .search(ancora.descricao)
+          .filter((r) => r.score <= threshold)
+          .map((r) => r.item);
+
+        if (achados.length >= 2) {
+          const grupo = { ancora, itens: achados };
+          if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
+            melhorGrupo = grupo;
+          }
+        }
+
+        const descartar = new Set([ancora.descricao, ...achados.map((i) => i.descricao)]);
+        for (let i = restante.length - 1; i >= 0; i--) {
+          if (descartar.has(restante[i].descricao)) restante.splice(i, 1);
+        }
+      }
+
+      return melhorGrupo;
+    }
 
     let gruposMesclados = 0;
     let atual = lista;
