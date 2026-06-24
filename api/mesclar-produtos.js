@@ -7,7 +7,7 @@ export default async function handler(req, res) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // --- LISTAR MESCLAGENS JÁ REALIZADAS ---
+  // ─── GET /api/mesclar-produtos ────────────────────────────────────────────
   if (req.method === 'GET') {
     try {
       const db = await getDb();
@@ -20,6 +20,7 @@ export default async function handler(req, res) {
         if (!grupos.has(key)) {
           grupos.set(key, {
             nome_final: r.nome_final,
+            nome_final_normalizado: key, // ← CAMPO ADICIONADO
             atualizado_em: r.updatedAt || r.createdAt || null,
             origens: [],
           });
@@ -34,9 +35,19 @@ export default async function handler(req, res) {
         }
       }
 
-      const mesclagens = [...grupos.values()].sort(
-        (a, b) => new Date(b.atualizado_em || 0) - new Date(a.atualizado_em || 0)
-      );
+      const gruposArray = [...grupos.values()];
+
+      // Buscar bloqueio para cada grupo
+      const normas = gruposArray.map(g => g.nome_final_normalizado);
+      const produtos = await db.collection('products').find({ nome_normalizado: { $in: normas } }).toArray();
+      const blockedMap = new Map(produtos.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
+
+      const mesclagens = gruposArray.map(g => ({
+        ...g,
+        blocked: blockedMap.get(g.nome_final_normalizado) || false,
+      }));
+
+      mesclagens.sort((a, b) => new Date(b.atualizado_em || 0) - new Date(a.atualizado_em || 0));
 
       return res.json({ ok: true, total: mesclagens.length, mesclagens });
     } catch (err) {
@@ -60,7 +71,7 @@ export default async function handler(req, res) {
     const norm = (text = '') =>
       text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
 
-    // --- DESFAZER MESCLAGEM (CORRIGIDO) ---
+    // ─── DESFAZER MESCLAGEM ──────────────────────────────────────────────────
     if (action === 'unmerge') {
       if (!descricao_mesclada) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
@@ -97,7 +108,7 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
-              block_auto_merge: false   // <-- ALTERAÇÃO: libera para auto-merge
+              block_auto_merge: false   // ← LIBERA para auto‑merge
             },
           },
           { upsert: true }
@@ -135,7 +146,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // --- MESCLAR PRODUTOS (PADRÃO) ---
+    // ─── MESCLAR PRODUTOS ────────────────────────────────────────────────────
     if (!Array.isArray(descricoes) || descricoes.length < 2) {
       return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
     }

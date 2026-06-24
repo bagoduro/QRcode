@@ -83,7 +83,9 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       try {
         const blacklistData = await apiGet('/auto-merge-blacklist');
         blacklist = blacklistData?.itens || [];
-      } catch (e) { console.warn('Blacklist não carregada', e); }
+      } catch (e) {
+        console.warn('Não foi possível carregar a blacklist', e);
+      }
 
       const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
       if (!data.sugestoes || data.sugestoes.length === 0) {
@@ -169,7 +171,17 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         </div>
 
         <div className="result-area">
-          {loading && <Loading text={autoMesclando ? 'Verificando duplicados e mesclando automaticamente...' : detalhe === null && sugestoes === null ? 'Buscando...' : 'Carregando histórico...'} />}
+          {loading && (
+            <Loading
+              text={
+                autoMesclando
+                  ? 'Verificando duplicados e mesclando automaticamente...'
+                  : detalhe === null && sugestoes === null
+                  ? 'Buscando...'
+                  : 'Carregando histórico...'
+              }
+            />
+          )}
           {!loading && error && <Alert tone="danger">{error}</Alert>}
           {!loading && mensagem?.tone === 'empty' && <EmptyState icon="ti-package-off" text={mensagem.text} />}
           {!loading && sugestoes && (
@@ -207,7 +219,8 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   );
 }
 
-// ─── COMPONENTE DE SUGESTÕES (COM BOTÃO DE DESBLOQUEIO) ─────────────────────
+// ─── SUGESTÕES ────────────────────────────────────────────────────────────────
+
 function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensagem, setError }) {
   const [modoMesclar, setModoMesclar] = useState(false);
   const [selecionados, setSelecionados] = useState(new Set());
@@ -218,14 +231,66 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
 
   const podeDesfazer = lista.length === 1 && lista[0].mesclado === true && isLoggedIn;
 
+  function toggleSelecionado(descricao) {
+    setSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(descricao)) next.delete(descricao);
+      else next.add(descricao);
+      if (next.size === 1 && !nomeFinal.trim()) {
+        setNomeFinal([...next][0]);
+      }
+      return next;
+    });
+  }
+
+  function cancelarMesclagem() {
+    setModoMesclar(false);
+    setSelecionados(new Set());
+    setNomeFinal('');
+  }
+
+  async function confirmarMesclagem() {
+    const descricoes = [...selecionados];
+    const nome = nomeFinal.trim();
+    if (descricoes.length < 2 || !nome) return;
+    setMesclando(true);
+    try {
+      const data = await apiPost('/mesclar-produtos', { descricoes, nome_final: nome });
+      setMensagem({
+        tone: 'success',
+        text: `"${data.nome_final}" criado — ${data.produtos_mesclados} produtos mesclados em ${data.notas_atualizadas} nota(s).`,
+      });
+      setTimeout(() => onConcluido?.(), 900);
+    } catch (err) {
+      setError(err.message);
+      setMesclando(false);
+    }
+  }
+
+  async function desfazerMesclagem() {
+    setDesfazendo(true);
+    try {
+      const data = await apiPost('/mesclar-produtos', { action: 'unmerge', descricao_mesclada: lista[0].descricao });
+      setMensagem({ tone: 'success', text: `Mesclagem de "${termo}" desfeita. ${data.itens_restaurados} itens restaurados.` });
+      setTimeout(() => onConcluido?.(), 900);
+    } catch (err) {
+      setError('Não foi possível desfazer: ' + err.message);
+      setDesfazendo(false);
+    }
+  }
+
   async function toggleBlock(item, blocked) {
     setDesbloqueando(item.descricao_normalizada);
     try {
       await apiPost('/toggle-block', {
         nome_normalizado: item.descricao_normalizada,
-        blocked: blocked, // false para desbloquear, true para bloquear
+        blocked,
       });
-      // Recarregar a lista atual
+      setMensagem({
+        tone: 'success',
+        text: `Produto "${item.descricao}" ${blocked ? 'bloqueado' : 'desbloqueado'} com sucesso.`,
+      });
+      setTimeout(() => setMensagem(null), 3000);
       onConcluido?.();
     } catch (err) {
       setError(err.message);
@@ -234,7 +299,7 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
     }
   }
 
-  // ... resto das funções (toggleSelecionado, cancelarMesclagem, confirmarMesclagem, desfazerMesclagem) permanecem iguais
+  const ok = selecionados.size >= 2 && nomeFinal.trim() !== '';
 
   return (
     <div>
@@ -286,9 +351,12 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
             {isLoggedIn && s.blocked && (
               <button
                 className="btn-modo-mesclar"
-                style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger)', marginLeft: '4px' }}
                 disabled={desbloqueando === s.descricao_normalizada}
-                onClick={(e) => { e.stopPropagation(); toggleBlock(s, false); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleBlock(s, false);
+                }}
               >
                 <i className={`ti ${desbloqueando === s.descricao_normalizada ? 'ti-loader-2 spin' : 'ti-unlock'}`} aria-hidden="true" />
                 {desbloqueando === s.descricao_normalizada ? '...' : 'Desbloquear'}
@@ -310,7 +378,7 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
           />
           <div className="mesclar-acoes">
             <button className="btn-mesclar-cancelar" onClick={cancelarMesclagem}>Cancelar</button>
-            <button className="btn-mesclar-confirmar" disabled={selecionados.size < 2 || !nomeFinal.trim() || mesclando} onClick={confirmarMesclagem}>
+            <button className="btn-mesclar-confirmar" disabled={!ok || mesclando} onClick={confirmarMesclagem}>
               <i className="ti ti-git-merge" aria-hidden="true" />
               <span>
                 {mesclando ? 'Mesclando...' : selecionados.size < 2 ? `Selecione ${2 - selecionados.size} mais` : `Mesclar ${selecionados.size} produtos`}
@@ -323,7 +391,8 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
   );
 }
 
-// ─── COMPONENTE DE DETALHE (COM BOTÃO DE DESBLOQUEIO) ────────────────────────
+// ─── DETALHE ──────────────────────────────────────────────────────────────────
+
 function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) {
   const [desfazendo, setDesfazendo] = useState(false);
   const [erroDesfazer, setErroDesfazer] = useState(null);
@@ -331,7 +400,9 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
 
   const ultima = data.ultima_compra;
   const menor = data.menor_preco;
-  const mesmaCompra = ultima.local === menor.local && (ultima.preco_unitario ?? ultima.valor_total) === (menor.preco_unitario ?? menor.valor_total);
+  const mesmaCompra =
+    ultima.local === menor.local &&
+    (ultima.preco_unitario ?? ultima.valor_total) === (menor.preco_unitario ?? menor.valor_total);
 
   const mostrarDesfazer = data.mesclado === true && isLoggedIn;
   const mostrarDesbloquear = data.blocked === true && isLoggedIn;
@@ -351,9 +422,15 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
 
   async function desbloquear() {
     setDesbloqueando(true);
+    setErroDesfazer(null);
     try {
+      const nomeNorm = termo
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
       await apiPost('/toggle-block', {
-        nome_normalizado: termo.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
+        nome_normalizado: nomeNorm,
         blocked: false,
       });
       onRecarregar();
@@ -372,7 +449,13 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
         </button>
         <div style={{ display: 'flex', gap: '8px' }}>
           {mostrarDesbloquear && (
-            <button className="btn-modo-mesclar" disabled={desbloqueando} onClick={desbloquear} title="Permitir que este produto seja mesclado automaticamente no futuro">
+            <button
+              className="btn-modo-mesclar"
+              disabled={desbloqueando}
+              onClick={desbloquear}
+              title="Permitir que este produto seja mesclado automaticamente no futuro"
+              style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+            >
               <i className={`ti ${desbloqueando ? 'ti-loader-2 spin' : 'ti-unlock'}`} aria-hidden="true" />
               {desbloqueando ? '...' : 'Desbloquear'}
             </button>
@@ -392,13 +475,17 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
         <div className="metric">
           <p className="label"><i className="ti ti-clock" aria-hidden="true" />Última compra</p>
           <p className="value">{formatValor(ultima.valor_total)}</p>
-          {ultima.preco_unitario != null && <p className="metric-sub">{formatPrecoUnitario(ultima.preco_unitario, ultima.unidade)}</p>}
+          {ultima.preco_unitario != null && (
+            <p className="metric-sub">{formatPrecoUnitario(ultima.preco_unitario, ultima.unidade)}</p>
+          )}
           <span className="badge last">{ultima.local}</span>
         </div>
         <div className="metric">
           <p className="label"><i className="ti ti-tag" aria-hidden="true" />Melhor preço/un</p>
           <p className="value">{formatValor(menor.valor_total)}</p>
-          {menor.preco_unitario != null && <p className="metric-sub">{formatPrecoUnitario(menor.preco_unitario, menor.unidade)}</p>}
+          {menor.preco_unitario != null && (
+            <p className="metric-sub">{formatPrecoUnitario(menor.preco_unitario, menor.unidade)}</p>
+          )}
           <span className="badge best">{mesmaCompra ? 'Mesmo local' : menor.local}</span>
         </div>
       </div>
@@ -416,7 +503,9 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
             </div>
             <div className="value value-stack">
               <span>{formatValor(h.valor_total)}</span>
-              {h.preco_unitario != null && <span className="value-sub">{formatPrecoUnitario(h.preco_unitario, h.unidade)}</span>}
+              {h.preco_unitario != null && (
+                <span className="value-sub">{formatPrecoUnitario(h.preco_unitario, h.unidade)}</span>
+              )}
             </div>
           </div>
         ))}
@@ -424,6 +513,8 @@ function Detalhe({ data, dataComp, termo, isLoggedIn, onVoltar, onRecarregar }) 
     </div>
   );
 }
+
+// ─── COMPARAÇÃO ──────────────────────────────────────────────────────────────
 
 function Comparacao({ data }) {
   if (!data || !data.lojas || data.lojas.length < 2) return null;
@@ -441,10 +532,17 @@ function Comparacao({ data }) {
               </span>
             </div>
             <div className="loja-card-valores">
-              <span><strong>{formatValor(loja.menor_valor)}</strong> menor {loja.menor_preco_unitario && <span className="loja-preco-un">({formatPrecoUnitario(loja.menor_preco_unitario, loja.unidade)})</span>}</span>
+              <span>
+                <strong>{formatValor(loja.menor_valor)}</strong> menor{' '}
+                {loja.menor_preco_unitario && (
+                  <span className="loja-preco-un">({formatPrecoUnitario(loja.menor_preco_unitario, loja.unidade)})</span>
+                )}
+              </span>
               <span><strong>{formatValor(loja.ultimo_valor)}</strong> último</span>
             </div>
-            <p className="loja-vezes">{loja.vezes_comprado} compra{loja.vezes_comprado !== 1 ? 's' : ''} registrada{loja.vezes_comprado !== 1 ? 's' : ''} • {loja.uf || ''}</p>
+            <p className="loja-vezes">
+              {loja.vezes_comprado} compra{loja.vezes_comprado !== 1 ? 's' : ''} registrada{loja.vezes_comprado !== 1 ? 's' : ''} • {loja.uf || ''}
+            </p>
           </div>
         );
       })}

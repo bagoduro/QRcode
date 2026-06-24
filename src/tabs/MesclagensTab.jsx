@@ -54,10 +54,15 @@ export default function MesclagensTab() {
   }
 
   async function toggleBlock(mesclagem, blocked) {
-    setDesbloqueando(mesclagem.nome_final_normalizado);
+    const norm = mesclagem.nome_final_normalizado;
+    if (!norm) {
+      setError('Erro: nome_normalizado não encontrado para este produto.');
+      return;
+    }
+    setDesbloqueando(norm);
     try {
       await apiPost('/toggle-block', {
-        nome_normalizado: mesclagem.nome_final_normalizado,
+        nome_normalizado: norm,
         blocked: blocked,
       });
       setSuccess(blocked ? 'Produto bloqueado para auto-merge.' : 'Produto desbloqueado para auto-merge.');
@@ -160,7 +165,7 @@ export default function MesclagensTab() {
                   <div className="top-row">
                     <p>{m.nome_final}</p>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      {m.blocked && (
+                      {m.blocked ? (
                         <button
                           className="btn-modo-mesclar"
                           style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
@@ -170,8 +175,7 @@ export default function MesclagensTab() {
                           <i className={`ti ${desbloqueando === m.nome_final_normalizado ? 'ti-loader-2 spin' : 'ti-unlock'}`} aria-hidden="true" />
                           {desbloqueando === m.nome_final_normalizado ? '...' : 'Desbloquear'}
                         </button>
-                      )}
-                      {!m.blocked && (
+                      ) : (
                         <button
                           className="btn-modo-mesclar"
                           style={{ color: 'var(--text-secondary)' }}
