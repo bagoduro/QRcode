@@ -83,7 +83,46 @@ const parseItemRow = (row, $) => {
   };
 };
 
-// ─── AUTO-MERGE DE ITENS NOVOS (SEM LOGS) ──────────────────────────────────
+// ─── AUTO-MERGE DE ITENS NOVOS (CORRIGIDO) ──────────────────────────────────
+async function criarRegraEMesclar(db, item, ancora, descNorm) {
+  const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
+
+  await mergeRules.updateOne(
+    { descricao_original_normalizada: descNorm },
+    {
+      $set: {
+        descricao_original: item.descricao,
+        descricao_original_normalizada: descNorm,
+        nome_final: ancora.nome_original,
+        nome_final_normalizado: ancora.nome_normalizado,
+        product_id: ancora._id,
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+
+  await purchases.updateMany(
+    { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
+    { $set: { 'itens.$[elem].descricao_original': item.descricao } },
+    { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+  );
+
+  await purchases.updateMany(
+    { 'itens.descricao': item.descricao },
+    {
+      $set: {
+        'itens.$[elem].descricao': ancora.nome_original,
+        'itens.$[elem].descricao_normalizada': ancora.nome_normalizado,
+        'itens.$[elem].product_id': ancora._id,
+      },
+    },
+    { arrayFilters: [{ 'elem.descricao': item.descricao }] }
+  );
+}
+
 async function autoMergeNewItems(db, itensNovos) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
@@ -98,62 +137,49 @@ async function autoMergeNewItems(db, itensNovos) {
     });
     if (existingRule) continue;
 
-    // Busca todos os produtos (exceto ele mesmo) e filtra bloqueados
+    // Busca o produto recém-criado (ou existente com esse nome normalizado)
+    let produtoAtual = await products.findOne({ nome_normalizado: descNorm });
+    if (!produtoAtual) continue; // segurança
+
+    const productId = produtoAtual._id;
+
+    // 1. Verifica se já existe outro produto com o MESMO nome normalizado (exato)
+    const produtosExatos = await products.find({
+      nome_normalizado: descNorm,
+      _id: { $ne: productId },
+      block_auto_merge: { $ne: true }
+    }).toArray();
+
+    if (produtosExatos.length > 0) {
+      // Usa o primeiro como âncora
+      const ancora = produtosExatos[0];
+      await criarRegraEMesclar(db, item, ancora, descNorm);
+      continue;
+    }
+
+    // 2. Busca todos os produtos (exceto o atual) com block_auto_merge != true
     const allProducts = await products.find({
-      nome_normalizado: { $ne: descNorm },
+      _id: { $ne: productId },
       block_auto_merge: { $ne: true }
     }).toArray();
 
     if (allProducts.length === 0) continue;
 
+    // 3. Fuse com threshold 0.5 (mais tolerante)
     const fuse = new Fuse(allProducts, {
       keys: ['nome_original', 'nome_normalizado'],
-      threshold: 0.4,
+      threshold: 0.5,
       includeScore: true,
       ignoreLocation: true,
     });
 
-    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.4);
+    const similares = fuse.search(item.descricao)
+      .filter(r => r.score <= 0.5)
+      .sort((a, b) => a.score - b.score);
 
     if (similares.length > 0) {
       const ancora = similares[0].item;
-
-      // Cria regra de mesclagem
-      await mergeRules.updateOne(
-        { descricao_original_normalizada: descNorm },
-        {
-          $set: {
-            descricao_original: item.descricao,
-            descricao_original_normalizada: descNorm,
-            nome_final: ancora.nome_original,
-            nome_final_normalizado: ancora.nome_normalizado,
-            product_id: ancora._id,
-            updatedAt: new Date(),
-          },
-          $setOnInsert: { createdAt: new Date() },
-        },
-        { upsert: true }
-      );
-
-      // Atualiza compras antigas que tenham esse item (sem descricao_original)
-      await purchases.updateMany(
-        { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
-        { $set: { 'itens.$[elem].descricao_original': item.descricao } },
-        { arrayFilters: [{ 'elem.descricao': item.descricao }] }
-      );
-
-      // Atualiza todas as ocorrências desse item para o nome final
-      await purchases.updateMany(
-        { 'itens.descricao': item.descricao },
-        {
-          $set: {
-            'itens.$[elem].descricao': ancora.nome_original,
-            'itens.$[elem].descricao_normalizada': ancora.nome_normalizado,
-            'itens.$[elem].product_id': ancora._id,
-          },
-        },
-        { arrayFilters: [{ 'elem.descricao': item.descricao }] }
-      );
+      await criarRegraEMesclar(db, item, ancora, descNorm);
     }
   }
 }
@@ -170,10 +196,8 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
-    // Guarda os itens originais para o auto‑merge posterior
     const itensOriginais = resultado.itens.map(item => ({ ...item }));
 
-    // Primeiro, aplica regras existentes e cria/atualiza produtos
     const regras = await mergeRules.find({}).toArray();
     const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
 
@@ -217,9 +241,6 @@ const savePurchase = async (url, resultado) => {
     };
 
     await purchases.insertOne(purchase);
-
-    // ─── AUTO‑MERGE DE ITENS NOVOS ──────────────────────────────────────────
-    // Agora que todos os produtos já estão no banco, podemos comparar
     await autoMergeNewItems(db, itensOriginais);
 
     return { duplicate: false };
@@ -439,7 +460,7 @@ app.delete('/historico-compras', requireAuth, async (req, res) => {
   }
 });
 
-// --- ENDPOINT DE MIGRAÇÃO ---
+// --- ENDPOINT DE MIGRAÇÃO (CORRIGIDO) ---
 app.post('/api/migrate', requireAuth, async (req, res) => {
   try {
     const db = await getDb();
@@ -470,8 +491,8 @@ app.post('/api/migrate', requireAuth, async (req, res) => {
       const restante = [...lista];
       restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
       const ancora = restante[0];
-      const fuse = new Fuse(restante, { keys: ['descricao'], threshold: 0.4 });
-      const achados = fuse.search(ancora.descricao).filter(r => r.score <= 0.4).map(r => r.item);
+      const fuse = new Fuse(restante, { keys: ['descricao'], threshold: 0.5 });
+      const achados = fuse.search(ancora.descricao).filter(r => r.score <= 0.5).map(r => r.item);
       return achados.length >= 2 ? { ancora, itens: achados } : null;
     }
 
