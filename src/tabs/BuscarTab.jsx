@@ -78,18 +78,6 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
       }
 
       let lista = data.sugestoes;
-      if (isLoggedIn) {
-        setAutoMesclando(true);
-        const resultado = await autoMesclar(lista);
-        setAutoMesclando(false);
-        lista = resultado.lista;
-        if (resultado.alguemFoiMesclado) {
-          // Reconsulta o servidor pra refletir as contagens/preços já consolidados
-          setLoading(true);
-          const dataAtualizada = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
-          lista = dataAtualizada.sugestoes || lista;
-        }
-      }
 
       if (lista.length === 1) {
         await mostrarHistoricoProduto(lista[0].descricao);

@@ -10,6 +10,7 @@ export default function MesclagensTab() {
   const [mesclagens, setMesclagens] = useState(null);
   const [pendingUndo, setPendingUndo] = useState(null); // { nome_final }
   const [undoingNome, setUndoingNome] = useState(null);
+  const [consolidando, setConsolidando] = useState(false);
 
   async function carregar() {
     setLoading(true);
@@ -43,6 +44,24 @@ export default function MesclagensTab() {
     }
   }
 
+  async function consolidarBanco() {
+    if (!confirm('Isso vai varrer todo o banco em busca de nomes similares e mesclá-los automaticamente. Deseja continuar?')) return;
+    
+    setConsolidando(true);
+    setError(null);
+    try {
+      const res = await apiPost('/migrate');
+      if (res.ok) {
+        alert(`Sucesso! ${res.grupos_mesclados || 0} grupos de produtos foram unificados.`);
+        carregar();
+      }
+    } catch (err) {
+      setError("Erro ao consolidar: " + err.message);
+    } finally {
+      setConsolidando(false);
+    }
+  }
+
   return (
     <section className="panel active">
       <div className="card">
@@ -51,9 +70,21 @@ export default function MesclagensTab() {
           Aqui ficam todos os produtos que foram unificados — automaticamente pelo Fuse.js ou manualmente por você.
           Pode desfazer qualquer mesclagem a qualquer momento.
         </p>
-        <button className="btn full" onClick={carregar}>
-          <i className="ti ti-refresh" aria-hidden="true" /> Atualizar lista
-        </button>
+        
+        <div className="btn-group-row" style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <button className="btn" onClick={carregar} style={{ flex: 1 }}>
+            <i className="ti ti-refresh" aria-hidden="true" /> Atualizar lista
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={consolidarBanco}
+            disabled={consolidando}
+            style={{ flex: 1 }}
+          >
+            <i className={`ti ${consolidando ? 'ti-loader-2 spin' : 'ti-wand'}`} aria-hidden="true" />
+            {consolidando ? 'Consolidando...' : 'Consolidar Banco'}
+          </button>
+        </div>
 
         <div className="result-area">
           {loading && <Loading text="Carregando mesclagens..." />}

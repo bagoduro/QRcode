@@ -1,21 +1,7 @@
 import { getDb } from '../db.js';
+import Fuse from 'fuse.js';
 
-function parseValorNum(valor) {
-  if (!valor) return null;
-  const limpo = String(valor)
-    .replace(/[^\d,.-]/g, '')
-    .replace(/\.(?=\d{3},)/g, '')
-    .replace(',', '.');
-  const n = parseFloat(limpo);
-  return isNaN(n) ? null : n;
-}
-
-function calcPrecoUnitario(valor_total, quantidade) {
-  const vt = parseValorNum(valor_total);
-  const qt = parseValorNum(String(quantidade ?? '').replace(',', '.'));
-  if (!vt || !qt || qt === 0) return null;
-  return Math.round((vt / qt) * 100) / 100;
-}
+const DEFAULT_THRESHOLD = 0.4;
 
 function normalizeProductName(text = '') {
   return text
@@ -26,10 +12,52 @@ function normalizeProductName(text = '') {
     .trim();
 }
 
+/**
+ * Procura, dentro de uma lista de sugestões de produto,
+ * o maior grupo de descrições que são variações/typos do mesmo produto.
+ */
+function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
+  if (!lista || lista.length < 2) return null;
+
+  const restante = [...lista];
+  let melhorGrupo = null;
+
+  while (restante.length >= 2) {
+    restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
+    const ancora = restante[0];
+
+    const fuse = new Fuse(restante, {
+      keys: ['descricao'],
+      includeScore: true,
+      threshold,
+      ignoreLocation: true,
+    });
+
+    const achados = fuse
+      .search(ancora.descricao)
+      .filter((r) => r.score <= threshold)
+      .map((r) => r.item);
+
+    if (achados.length >= 2) {
+      const grupo = { ancora, itens: achados };
+      if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
+        melhorGrupo = grupo;
+      }
+    }
+
+    const descartar = new Set([ancora.descricao, ...achados.map((i) => i.descricao)]);
+    for (let i = restante.length - 1; i >= 0; i--) {
+      if (descartar.has(restante[i].descricao)) restante.splice(i, 1);
+    }
+  }
+
+  return melhorGrupo;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Proteção por senha — defina MIGRATE_SECRET nas env vars da Vercel
+  // Proteção por senha
   const secret = process.env.MIGRATE_SECRET;
   if (!secret || req.query.secret !== secret) {
     return res.status(401).json({ error: 'Não autorizado. Informe ?secret=SUA_SENHA' });
@@ -45,77 +73,113 @@ export default async function handler(req, res) {
     const products   = db.collection('products');
     const mergeRules = db.collection('merge_rules');
 
-    // Garante índice único na coleção de regras de auto-merge
-    await mergeRules.createIndex(
-      { descricao_original_normalizada: 1 },
-      { unique: true, name: 'idx_merge_rules_orig_norm' }
-    );
-    await mergeRules.createIndex(
-      { nome_final_normalizado: 1 },
-      { name: 'idx_merge_rules_final_norm' }
-    );
+    // 1. Agrupar todos os produtos distintos do banco de compras para encontrar duplicados
+    const pipeline = [
+      { $unwind: '$itens' },
+      {
+        $group: {
+          _id: '$itens.descricao_normalizada',
+          descricao: { $first: '$itens.descricao' },
+          vezes: { $sum: 1 }
+        }
+      }
+    ];
 
-    const todasCompras = await purchases.find({}).toArray();
+    const todosProdutos = await purchases.aggregate(pipeline).toArray();
+    const listaParaFuse = todosProdutos.map(p => ({
+      descricao: p.descricao,
+      descricao_normalizada: p._id,
+      vezes: p.vezes
+    }));
 
-    let notasProcessadas   = 0;
-    let itensProcessados   = 0;
-    let produtosCriados    = 0;
-    let produtosExistentes = 0;
+    let gruposMesclados = 0;
+    let totalRegrasCriadas = 0;
+    let totalNotasAtualizadas = 0;
 
-    for (const compra of todasCompras) {
-      notasProcessadas++;
-      const itensEnriquecidos = [];
+    // 2. Rodar Fuse.js repetidamente até não encontrar mais grupos óbvios
+    let atual = listaParaFuse;
+    while (true) {
+      const grupo = sugerirGrupoDuplicado(atual);
+      if (!grupo) break;
 
-      for (const item of compra.itens ?? []) {
-        itensProcessados++;
+      const nomeFinal = grupo.ancora.descricao;
+      const nomeFinalNorm = normalizeProductName(nomeFinal);
+      const descricoesOriginais = grupo.itens.map(i => i.descricao);
 
-        const preco_unitario =
-          item.preco_unitario ?? calcPrecoUnitario(item.valor_total, item.quantidade);
-
-        const nomeNormalizado = normalizeProductName(item.descricao);
-        const filter = item.codigo
-          ? { codigo: item.codigo }
-          : { nome_normalizado: nomeNormalizado };
-
-        const update = {
-          $setOnInsert: {
-            createdAt:        new Date(),
-            codigo:           item.codigo || null,
-            nome_original:    item.descricao,
-            nome_normalizado: nomeNormalizado,
+      // Criar/Atualizar o produto canônico
+      await products.updateOne(
+        { nome_normalizado: nomeFinalNorm },
+        {
+          $setOnInsert: { createdAt: new Date(), codigo: null },
+          $set: {
+            nome_original: nomeFinal,
+            nome_normalizado: nomeFinalNorm,
+            updatedAt: new Date(),
           },
-          $set: { updatedAt: new Date() },
-        };
+        },
+        { upsert: true }
+      );
+      const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
 
-        const existingBefore = await products.findOne(filter);
-        await products.updateOne(filter, update, { upsert: true });
-        const result = await products.findOne(filter);
+      // Atualizar compras e criar regras
+      for (const descOriginal of descricoesOriginais) {
+        if (normalizeProductName(descOriginal) === nomeFinalNorm) continue;
 
-        if (existingBefore) produtosExistentes++;
-        else produtosCriados++;
+        const descOrigNorm = normalizeProductName(descOriginal);
 
-        itensEnriquecidos.push({
-          ...item,
-          descricao_normalizada: nomeNormalizado,
-          product_id:            result._id,
-          preco_unitario,
-        });
+        // Salvar regra de auto-merge
+        await mergeRules.updateOne(
+          { descricao_original_normalizada: descOrigNorm },
+          {
+            $set: {
+              descricao_original: descOriginal,
+              descricao_original_normalizada: descOrigNorm,
+              nome_final: nomeFinal,
+              nome_final_normalizado: nomeFinalNorm,
+              product_id: produtoCanonico._id,
+              updatedAt: new Date(),
+            },
+            $setOnInsert: { createdAt: new Date() },
+          },
+          { upsert: true }
+        );
+        totalRegrasCriadas++;
+
+        // Atualizar notas que contenham esse item (preservando o original se necessário)
+        await purchases.updateMany(
+          { 'itens.descricao': descOriginal, 'itens.descricao_original': { $exists: false } },
+          { $set: { 'itens.$[elem].descricao_original': descOriginal } },
+          { arrayFilters: [{ 'elem.descricao': descOriginal }] }
+        );
+
+        const result = await purchases.updateMany(
+          { 'itens.descricao': descOriginal },
+          {
+            $set: {
+              'itens.$[elem].descricao': nomeFinal,
+              'itens.$[elem].descricao_normalizada': nomeFinalNorm,
+              'itens.$[elem].product_id': produtoCanonico._id,
+            },
+          },
+          { arrayFilters: [{ 'elem.descricao': descOriginal }] }
+        );
+        totalNotasAtualizadas += result.modifiedCount;
       }
 
-      await purchases.updateOne(
-        { _id: compra._id },
-        { $set: { itens: itensEnriquecidos } }
-      );
+      gruposMesclados++;
+      
+      // Remover os itens processados da lista para a próxima iteração
+      const descricoesNoGrupo = new Set(descricoesOriginais);
+      atual = atual.filter(i => !descricoesNoGrupo.has(i.descricao));
     }
 
     return res.json({
       ok: true,
       resumo: {
-        notas_processadas:    notasProcessadas,
-        itens_processados:    itensProcessados,
-        produtos_criados:     produtosCriados,
-        produtos_ja_existentes: produtosExistentes,
-      },
+        grupos_mesclados: gruposMesclados,
+        regras_criadas: totalRegrasCriadas,
+        notas_atualizadas: totalNotasAtualizadas
+      }
     });
 
   } catch (err) {

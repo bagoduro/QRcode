@@ -3,6 +3,7 @@ import express from 'express';
 import { load } from 'cheerio';
 import { getDb } from './db.js';
 import authHandler, { verifyJwt } from './api/auth.js';
+import Fuse from 'fuse.js';
 
 // ── Middleware: exige token JWT válido ────────────────────────────────────────
 function requireAuth(req, res, next) {
@@ -15,8 +16,6 @@ function requireAuth(req, res, next) {
   next();
 }
 
-
-
 const app = express();
 const port = process.env.PORT || 3333;
 
@@ -24,6 +23,7 @@ app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   next();
 });
 
@@ -67,7 +67,6 @@ const upsertProduct = async (db, item) => {
   return result._id;
 };
 
-
 const parseItemRow = (row, $) => {
   const cols = $(row)
     .find('td')
@@ -90,8 +89,8 @@ const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
     const db = await getDb();
-    console.log('[savePurchase] Conectado ao banco');
     const purchases = db.collection('purchases');
+    const mergeRules = db.collection('merge_rules');
 
     const existing = await purchases.findOne({ url });
     if (existing) {
@@ -99,14 +98,36 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
+    // Carregar regras de mesclagem para aplicar automaticamente
+    const regras = await mergeRules.find({}).toArray();
+    const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
+
     // Upsert cada item no catálogo de produtos e enriquecer com product_id + nome_normalizado
     const itensEnriquecidos = await Promise.all(
       resultado.itens.map(async (item) => {
-        const productId = await upsertProduct(db, item);
+        const normOriginal = normalizeProductName(item.descricao);
+        const regra = mapRegras.get(normOriginal);
+        
+        let descricaoFinal = item.descricao;
+        let descricaoNormFinal = normOriginal;
+        let productId = null;
+        let descOriginalPreservada = undefined;
+
+        if (regra) {
+          descricaoFinal = regra.nome_final;
+          descricaoNormFinal = regra.nome_final_normalizado;
+          productId = regra.product_id;
+          descOriginalPreservada = item.descricao;
+        } else {
+          productId = await upsertProduct(db, item);
+        }
+
         return {
           ...item,
-          descricao_normalizada: normalizeProductName(item.descricao),
+          descricao: descricaoFinal,
+          descricao_normalizada: descricaoNormFinal,
           product_id: productId,
+          ...(descOriginalPreservada && { descricao_original: descOriginalPreservada })
         };
       })
     );
@@ -130,7 +151,6 @@ const savePurchase = async (url, resultado) => {
   }
 };
 
-
 function parseValorNum(valor) {
   if (!valor) return null;
   const limpo = String(valor)
@@ -145,29 +165,24 @@ function calcPrecoUnitario(valor_total, quantidade) {
   const vt = parseValorNum(valor_total);
   const qt = parseValorNum(String(quantidade).replace(',', '.'));
   if (!vt || !qt || qt === 0) return null;
-  return Math.round((vt / qt) * 100) / 100; // 2 casas
+  return Math.round((vt / qt) * 100) / 100;
 }
-
-const extractTableRow = ($table, $) => {
-  const row = $table.find('tbody tr').first();
-  return row.find('td').toArray().map((td) => normalizeText($(td).text()));
-};
 
 const parseHtml = (html) => {
   const $ = load(html);
 
   const emitenteSection = $("h5:contains('Emitente')").first();
   const emitenteTable = emitenteSection.nextAll('table').first();
-  const emitenteCells = extractTableRow(emitenteTable, $);
+  const emitenteCells = emitenteTable.length ? emitenteTable.find('tbody tr').first().find('td').toArray().map(td => normalizeText($(td).text())) : [];
 
   const dataEmissaoTable = $("th:contains('Data Emissão')").closest('table');
-  const dataEmissaoCells = extractTableRow(dataEmissaoTable, $);
+  const dataEmissaoCells = dataEmissaoTable.length ? dataEmissaoTable.find('tbody tr').first().find('td').toArray().map(td => normalizeText($(td).text())) : [];
 
   const valorTotalServicoTable = $("th:contains('Valor total do serviço')").closest('table');
-  const valorTotalServicoCells = extractTableRow(valorTotalServicoTable, $);
+  const valorTotalServicoCells = valorTotalServicoTable.length ? valorTotalServicoTable.find('tbody tr').first().find('td').toArray().map(td => normalizeText($(td).text())) : [];
 
   const protocoloTable = $("th:contains('Protocolo')").closest('table');
-  const protocoloCells = extractTableRow(protocoloTable, $);
+  const protocoloCells = protocoloTable.length ? protocoloTable.find('tbody tr').first().find('td').toArray().map(td => normalizeText($(td).text())) : [];
 
   const chaveAcessoPanel = $(".panel-title:contains('Chave de acesso')")
     .closest('.panel')
@@ -220,84 +235,37 @@ const parseHtml = (html) => {
 
 const fetchAndParseUrl = async (url) => {
   const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
   });
-
-  if (!response.ok) {
-    const message = `Falha ao obter a página da SEFAZ-MG: ${response.status} ${response.statusText}`;
-    throw new Error(message);
-  }
-
+  if (!response.ok) throw new Error(`Falha ao obter a página da SEFAZ-MG: ${response.status}`);
   const html = await response.text();
   return parseHtml(html);
 };
 
+// --- ENDPOINTS ---
+
 app.post('/consulta-qrcode', async (req, res) => {
   const { url } = req.body;
-  console.log('[POST /consulta-qrcode] Requisição recebida:', { url });
-  
-  if (!url) {
-    return res.status(400).json({ error: 'A propriedade "url" é obrigatória.' });
-  }
-
-  try {
-    new URL(url);
-  } catch (error) {
-    return res.status(400).json({ error: 'URL inválida.' });
-  }
-
+  if (!url) return res.status(400).json({ error: 'A propriedade "url" é obrigatória.' });
   try {
     const resultado = await fetchAndParseUrl(url);
     const saveResult = await savePurchase(url, resultado);
-    if (saveResult?.duplicate) {
-      return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
-    }
+    if (saveResult?.duplicate) return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
     return res.json(resultado);
   } catch (error) {
-    console.error('[POST /consulta-qrcode] Erro:', error.message);
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
   }
 });
 
-
-// ── Rotas de autenticação ─────────────────────────────────────────────────────
-app.get('/api/auth', (req, res) => authHandler(req, res));
-app.post('/api/auth', (req, res) => authHandler(req, res));
-// (rota sem prefixo para compatibilidade com fetch('/api/auth') do front)
-app.get('/auth', (req, res) => authHandler(req, res));
-app.post('/auth', (req, res) => authHandler(req, res));
-
-app.get('/', (req, res) => {
-  res.type('text/plain').send(
-    'API NFC-e backend. Use GET /consulta-qrcode?url=<URL> ou POST /consulta-qrcode com { "url": "..." }'
-  );
-});
-
 app.get('/consulta-qrcode', async (req, res) => {
   const { url } = req.query;
-  console.log('[GET /consulta-qrcode] Requisição recebida:', { url });
-  
-  if (!url) {
-    return res.status(400).json({ error: 'O parâmetro "url" é obrigatório.' });
-  }
-
-  try {
-    new URL(url);
-  } catch (error) {
-    return res.status(400).json({ error: 'URL inválida.' });
-  }
-
+  if (!url) return res.status(400).json({ error: 'O parâmetro "url" é obrigatória.' });
   try {
     const resultado = await fetchAndParseUrl(url);
     const saveResult = await savePurchase(url, resultado);
-    if (saveResult?.duplicate) {
-      return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
-    }
+    if (saveResult?.duplicate) return res.status(409).json({ error: 'Nota já registrada anteriormente.', duplicate: true });
     return res.json(resultado);
   } catch (error) {
-    console.error('[GET /consulta-qrcode] Erro:', error.message);
     return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
   }
 });
@@ -314,430 +282,199 @@ app.get('/health', async (req, res) => {
 
 const parseValor = (valor) => {
   if (!valor) return Infinity;
-  const limpo = String(valor)
-    .replace(/[^\d,.-]/g, '')
-    .replace(/\.(?=\d{3},)/g, '')
-    .replace(',', '.');
+  const limpo = String(valor).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3},)/g, '').replace(',', '.');
   const numero = parseFloat(limpo);
   return isNaN(numero) ? Infinity : numero;
 };
 
 app.get('/historico-compras', async (req, res) => {
-  const { produto, codigo, recorrentes, min_compras, comparar } = req.query;
-
+  const { produto, codigo, recorrentes, min_compras, sugestoes } = req.query;
   try {
     const db = await getDb();
     const purchases = db.collection('purchases');
+    const mergeRules = db.collection('merge_rules');
 
-  // Sugestões: retorna lista de produtos distintos que batem com o termo
-  const { sugestoes } = req.query;
-  if (sugestoes === 'true' && produto) {
-    const termoNorm = produto
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .trim();
-
-    const pipeline = [
-      {
-        $match: {
-          $or: [
-            { 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } },
-            { 'itens.descricao': { $regex: produto, $options: 'i' } },
-          ],
-        },
-      },
-      { $unwind: '$itens' },
-      {
-        $match: {
-          $or: [
-            { 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } },
-            { 'itens.descricao': { $regex: produto, $options: 'i' } },
-          ],
-        },
-      },
-      {
-        $group: {
-          _id: { $ifNull: ['$itens.descricao_normalizada', { $toLower: '$itens.descricao' }] },
-          descricao_original: { $first: '$itens.descricao' },
-          codigo: { $first: '$itens.codigo' },
-          vezes: { $sum: 1 },
-          menor_preco_unitario: {
-            $min: { $ifNull: ['$itens.preco_unitario', null] },
-          },
-          ultimo_valor: { $last: '$itens.valor_total' },
-          ultimo_local: { $last: '$emitente.nome' },
-        },
-      },
-      { $sort: { vezes: -1 } },
-      { $limit: 10 },
-    ];
-
-    const sugestoesList = await purchases.aggregate(pipeline).toArray();
-
-    // Verifica quais sugestões são produtos mesclados
-    const mergeRules  = db.collection('merge_rules');
-    const normsRetornadas = sugestoesList.map((s) => s._id).filter(Boolean);
-    const regrasAtivas = normsRetornadas.length
-      ? await mergeRules.find({ nome_final_normalizado: { $in: normsRetornadas } }).toArray()
-      : [];
-    const mesclados = new Set(regrasAtivas.map((r) => r.nome_final_normalizado));
-
-    return res.json({
-      termo: produto,
-      total: sugestoesList.length,
-      sugestoes: sugestoesList.map((s) => ({
-        descricao: s.descricao_original,
-        descricao_normalizada: s._id,
-        codigo: s.codigo,
-        vezes: s.vezes,
-        menor_preco_unitario: s.menor_preco_unitario,
-        ultimo_valor: s.ultimo_valor,
-        ultimo_local: s.ultimo_local,
-        mesclado: mesclados.has(s._id),
-      })),
-    });
-  }
-
-  // Caso especial: comparar preços de um produto entre estabelecimentos
-  const { comparar } = req.query;
-  if (comparar && (produto || codigo)) {
-    const matchStage = {};
-    if (codigo) {
-      matchStage['itens.codigo'] = codigo;
-    } else {
-      matchStage['itens.descricao_normalizada'] = {
-        $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
-        $options: 'i',
-      };
-    }
-
-    const pipeline = [
-      { $match: matchStage },
-      { $unwind: '$itens' },
-      ...(codigo
-        ? [{ $match: { 'itens.codigo': codigo } }]
-        : [{
-            $match: {
-              'itens.descricao_normalizada': {
-                $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(),
-                $options: 'i',
-              },
-            },
-          }]),
-      {
-        $group: {
-          _id: '$emitente.cnpj',
-          local: { $first: '$emitente.nome' },
-          cnpj: { $first: '$emitente.cnpj' },
-          uf: { $first: '$emitente.uf' },
-          vezes_comprado: { $sum: 1 },
-          menor_valor: { $min: { $toDouble: { $ifNull: ['$itens._valor_num', 0] } } },
-          ultimo_valor: { $last: '$itens.valor_total' },
-          ultima_data: { $max: '$createdAt' },
-          ocorrencias: {
-            $push: {
-              data_compra: '$nota.data_emissao',
-              createdAt: '$createdAt',
-              valor_total: '$itens.valor_total',
-              quantidade: '$itens.quantidade',
-            },
-          },
-        },
-      },
-      { $sort: { vezes_comprado: -1, ultima_data: -1 } },
-    ];
-
-    const lojas = await purchases.aggregate(pipeline).toArray();
-
-    // Calcular menor preço real em JS (parseValor é mais confiável que $toDouble)
-    const lojasEnriquecidas = lojas.map((loja) => {
-      const ocorrencias = [...loja.ocorrencias].sort(
-        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-      );
-      const menorOcorrencia = loja.ocorrencias.reduce((menor, atual) => {
-        return parseValor(atual.valor_total) < parseValor(menor.valor_total) ? atual : menor;
-      }, loja.ocorrencias[0]);
-
-      return {
-        local: loja.local,
-        cnpj: loja.cnpj,
-        uf: loja.uf,
-        vezes_comprado: loja.vezes_comprado,
-        ultimo_valor: ocorrencias[0]?.valor_total,
-        ultima_data: ocorrencias[0]?.data_compra,
-        menor_valor: menorOcorrencia?.valor_total,
-        ocorrencias,
-      };
-    });
-
-    // Ordenar por menor preço encontrado
-    const lojasOrdenadas = [...lojasEnriquecidas].sort(
-      (a, b) => parseValor(a.menor_valor) - parseValor(b.menor_valor)
-    );
-
-    return res.json({
-      produto: produto || codigo,
-      total_lojas: lojasOrdenadas.length,
-      lojas: lojasOrdenadas,
-    });
-  }
-
-    // Caso 1: buscar histórico de um produto específico (por nome ou código)
-    if (produto || codigo) {
-      const matchStage = {};
-
-      if (codigo) {
-        matchStage['itens.codigo'] = codigo;
-      } else if (produto) {
-        matchStage['$or'] = [
-          { 'itens.descricao_normalizada': { $regex: produto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim(), $options: 'i' } },
-          { 'itens.descricao': { $regex: produto, $options: 'i' } },
-        ];
-      }
-
+    if (sugestoes === 'true' && produto) {
+      const termoNorm = normalizeProductName(produto);
       const pipeline = [
-        { $match: matchStage },
+        { $match: { $or: [{ 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } }, { 'itens.descricao': { $regex: produto, $options: 'i' } }] } },
         { $unwind: '$itens' },
-        ...(codigo
-          ? [{ $match: { 'itens.codigo': codigo } }]
-          : [{ $match: { 'itens.descricao': { $regex: produto, $options: 'i' } } }]),
-        {
-          $project: {
-            _id: 0,
-            data_compra: '$nota.data_emissao',
-            createdAt: 1,
-            local: '$emitente.nome',
-            cnpj: '$emitente.cnpj',
-            uf: '$emitente.uf',
-            descricao: '$itens.descricao',
-            codigo: '$itens.codigo',
-            quantidade: '$itens.quantidade',
-            unidade: '$itens.unidade',
-            valor_total: '$itens.valor_total',
-          },
-        },
-        { $sort: { createdAt: -1 } },
-      ];
-
-      const historico = await purchases.aggregate(pipeline).toArray();
-
-      if (historico.length === 0) {
-        return res.json({
-          produto: produto || codigo,
-          ultima_compra: null,
-          menor_preco: null,
-          historico: [],
-        });
-      }
-
-      const ultimaCompra = historico[0];
-
-      const menorPreco = historico.reduce((menor, atual) => {
-        const valorAtual = parseValor(atual.valor_total);
-        const valorMenor = parseValor(menor.valor_total);
-        return valorAtual < valorMenor ? atual : menor;
-      }, historico[0]);
-
-      return res.json({
-        produto: produto || codigo,
-        ultima_compra: ultimaCompra,
-        menor_preco: menorPreco,
-        historico,
-      });
-    }
-
-    // Caso 2: itens recorrentes
-    if (recorrentes === 'true') {
-      const minCompras = parseInt(min_compras, 10) || 2;
-
-      const pipeline = [
-        { $unwind: '$itens' },
+        { $match: { $or: [{ 'itens.descricao_normalizada': { $regex: termoNorm, $options: 'i' } }, { 'itens.descricao': { $regex: produto, $options: 'i' } }] } },
         {
           $group: {
-            _id: {
-              codigo: '$itens.codigo',
-              descricao: '$itens.descricao',
-            },
-            descricao: { $last: '$itens.descricao' },
-            codigo: { $last: '$itens.codigo' },
-            vezes_comprado: { $sum: 1 },
-            ultima_data: { $max: '$createdAt' },
-            ultimo_local: { $last: '$emitente.nome' },
+            _id: { $ifNull: ['$itens.descricao_normalizada', { $toLower: '$itens.descricao' }] },
+            descricao_original: { $first: '$itens.descricao' },
+            codigo: { $first: '$itens.codigo' },
+            vezes: { $sum: 1 },
+            menor_preco_unitario: { $min: { $ifNull: ['$itens.preco_unitario', null] } },
             ultimo_valor: { $last: '$itens.valor_total' },
-            ocorrencias: {
-              $push: {
-                createdAt: '$createdAt',
-                local: '$emitente.nome',
-                cnpj: '$emitente.cnpj',
-                valor_total: '$itens.valor_total',
-                data_compra: '$nota.data_emissao',
-              },
-            },
+            ultimo_local: { $last: '$emitente.nome' },
           },
         },
-        { $match: { vezes_comprado: { $gte: minCompras } } },
-        { $sort: { vezes_comprado: -1, ultima_data: -1 } },
+        { $sort: { vezes: -1 } },
+        { $limit: 10 },
       ];
-
-      const grupos = await purchases.aggregate(pipeline).toArray();
-
-      const itensRecorrentes = grupos.map((grupo) => {
-        const ocorrenciasOrdenadas = [...grupo.ocorrencias].sort(
-          (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-        );
-
-        const menorPreco = grupo.ocorrencias.reduce((menor, atual) => {
-          const valorAtual = parseValor(atual.valor_total);
-          const valorMenor = parseValor(menor.valor_total);
-          return valorAtual < valorMenor ? atual : menor;
-        }, grupo.ocorrencias[0]);
-
-        return {
-          descricao: grupo.descricao,
-          codigo: grupo.codigo,
-          vezes_comprado: grupo.vezes_comprado,
-          ultima_compra: ocorrenciasOrdenadas[0],
-          menor_preco: menorPreco,
-        };
-      });
-
+      const list = await purchases.aggregate(pipeline).toArray();
+      const norms = list.map(s => s._id).filter(Boolean);
+      const rules = await mergeRules.find({ nome_final_normalizado: { $in: norms } }).toArray();
+      const mesclados = new Set(rules.map(r => r.nome_final_normalizado));
       return res.json({
-        criterio_minimo_compras: minCompras,
-        total: itensRecorrentes.length,
-        itens_recorrentes: itensRecorrentes,
+        termo: produto,
+        sugestoes: list.map(s => ({ ...s, descricao: s.descricao_original, descricao_normalizada: s._id, mesclado: mesclados.has(s._id) }))
       });
     }
 
-    // Caso 3: listar histórico geral de compras (resumo por nota)
-    const pipeline = [
-      {
-        $project: {
-          _id: 0,
-          url: 1,
-          createdAt: 1,
-          local: '$emitente.nome',
-          cnpj: '$emitente.cnpj',
-          data_compra: '$nota.data_emissao',
-          valor_pago: '$totais.valor_pago',
-          valor_total: '$totais.valor_total',
-          quantidade_itens: '$totais.quantidade_total_itens',
-          itens: {
-            $map: {
-              input: '$itens',
-              as: 'item',
-              in: {
-                descricao: '$$item.descricao',
-                codigo: '$$item.codigo',
-                quantidade: '$$item.quantidade',
-                valor_total: '$$item.valor_total',
-              },
-            },
-          },
-        },
-      },
-      { $sort: { createdAt: -1 } },
-    ];
+    if (produto || codigo) {
+      const match = codigo ? { 'itens.codigo': codigo } : { $or: [{ 'itens.descricao_normalizada': normalizeProductName(produto) }, { 'itens.descricao': { $regex: produto, $options: 'i' } }] };
+      const pipeline = [
+        { $match: match },
+        { $unwind: '$itens' },
+        ...(codigo ? [{ $match: { 'itens.codigo': codigo } }] : [{ $match: { 'itens.descricao': { $regex: produto, $options: 'i' } } }]),
+        { $project: { _id: 0, data_compra: '$nota.data_emissao', createdAt: 1, local: '$emitente.nome', descricao: '$itens.descricao', valor_total: '$itens.valor_total' } },
+        { $sort: { createdAt: -1 } }
+      ];
+      const hist = await purchases.aggregate(pipeline).toArray();
+      const rule = await mergeRules.findOne({ nome_final_normalizado: normalizeProductName(produto || '') });
+      return res.json({ produto: produto || codigo, historico: hist, mesclado: !!rule });
+    }
 
+    const pipeline = [{ $project: { _id: 0, url: 1, createdAt: 1, local: '$emitente.nome', data_compra: '$nota.data_emissao', valor_total: '$totais.valor_total' } }, { $sort: { createdAt: -1 } }];
     const compras = await purchases.aggregate(pipeline).toArray();
-
     return res.json({ total: compras.length, compras });
   } catch (err) {
-    console.error('[GET /historico-compras] Erro:', err.message, err.stack);
-    return res.status(500).json({ error: 'Erro interno', details: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
 app.delete('/historico-compras', requireAuth, async (req, res) => {
   const { url } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
-  }
-
+  if (!url) return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
   try {
     const db = await getDb();
-    const purchases = db.collection('purchases');
-
-    const result = await purchases.deleteOne({ url });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Nota não encontrada.' });
-    }
-
-    return res.json({ success: true, message: 'Nota excluída com sucesso.' });
+    const result = await db.collection('purchases').deleteOne({ url });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'Nota não encontrada.' });
+    return res.json({ success: true });
   } catch (err) {
-    console.error('[DELETE /historico-compras] Erro:', err.message, err.stack);
-    return res.status(500).json({ error: 'Erro interno', details: err.message });
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Backend NFC-e rodando em http://localhost:${port}`);
-  console.log('[Startup] Variáveis de ambiente:');
-  console.log('[Startup] PORT:', port);
-  console.log('[Startup] MONGO_URI definida:', !!process.env.MONGO_URI);
-  console.log('[Startup] MONGO_DB_NAME:', process.env.MONGO_DB_NAME || 'leitor_qr (padrão)');
-});
-
-// POST /mesclar-produtos
-app.post('/mesclar-produtos', requireAuth, async (req, res) => {
-  const { descricoes, nome_final } = req.body || {};
-
-  if (!Array.isArray(descricoes) || descricoes.length < 2) {
-    return res.status(400).json({ error: 'Informe ao menos 2 produtos em "descricoes".' });
-  }
-  if (!nome_final || !nome_final.trim()) {
-    return res.status(400).json({ error: 'Informe o "nome_final" para o produto mesclado.' });
-  }
-
-  try {
-    const db = await getDb();
-    const purchases = db.collection('purchases');
-    const products  = db.collection('products');
-
-    const nomeFinal = nome_final.trim();
-    const nomeFinalNorm = nomeFinal
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    await products.updateOne(
-      { nome_normalizado: nomeFinalNorm },
-      {
-        $setOnInsert: { createdAt: new Date(), codigo: null },
-        $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() },
-      },
-      { upsert: true }
-    );
-    const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
-
-    let totalAtualizados = 0;
-    for (const descricao of descricoes) {
-      const result = await purchases.updateMany(
-        { 'itens.descricao': descricao },
-        {
-          $set: {
-            'itens.$[elem].descricao': nomeFinal,
-            'itens.$[elem].descricao_normalizada': nomeFinalNorm,
-            'itens.$[elem].product_id': produtoCanonico._id,
-          },
-        },
-        { arrayFilters: [{ 'elem.descricao': descricao }] }
-      );
-      totalAtualizados += result.modifiedCount;
-    }
-
-    const descNormsAntigas = descricoes
-      .map((d) => d.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim())
-      .filter((n) => n !== nomeFinalNorm);
-    await products.deleteMany({ nome_normalizado: { $in: descNormsAntigas } });
-
-    return res.json({ ok: true, nome_final: nomeFinal, produtos_mesclados: descricoes.length, notas_atualizadas: totalAtualizados });
-  } catch (err) {
-    console.error('[POST /mesclar-produtos] Erro:', err.message, err.stack);
     return res.status(500).json({ error: err.message });
   }
 });
+
+// --- NOVO ENDPOINT DE MIGRAÇÃO ---
+app.post('/api/migrate', requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const purchases  = db.collection('purchases');
+    const products   = db.collection('products');
+    const mergeRules = db.collection('merge_rules');
+
+    const pipeline = [
+      { $unwind: '$itens' },
+      {
+        $group: {
+          _id: '$itens.descricao_normalizada',
+          descricao: { $first: '$itens.descricao' },
+          vezes: { $sum: 1 }
+        }
+      }
+    ];
+
+    const todosProdutos = await purchases.aggregate(pipeline).toArray();
+    const listaParaFuse = todosProdutos.map(p => ({
+      descricao: p.descricao,
+      descricao_normalizada: p._id,
+      vezes: p.vezes
+    }));
+
+    function sugerirGrupoDuplicado(lista) {
+      if (!lista || lista.length < 2) return null;
+      const restante = [...lista];
+      restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
+      const ancora = restante[0];
+      const fuse = new Fuse(restante, { keys: ['descricao'], threshold: 0.4 });
+      const achados = fuse.search(ancora.descricao).filter(r => r.score <= 0.4).map(r => r.item);
+      return achados.length >= 2 ? { ancora, itens: achados } : null;
+    }
+
+    let gruposMesclados = 0;
+    let atual = listaParaFuse;
+    while (true) {
+      const grupo = sugerirGrupoDuplicado(atual);
+      if (!grupo) break;
+
+      const nomeFinal = grupo.ancora.descricao;
+      const nomeFinalNorm = normalizeProductName(nomeFinal);
+      const descricoesOriginais = grupo.itens.map(i => i.descricao);
+
+      await products.updateOne({ nome_normalizado: nomeFinalNorm }, { $setOnInsert: { createdAt: new Date(), codigo: null }, $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() } }, { upsert: true });
+      const prod = await products.findOne({ nome_normalizado: nomeFinalNorm });
+
+      for (const desc of descricoesOriginais) {
+        if (normalizeProductName(desc) === nomeFinalNorm) continue;
+        const descNorm = normalizeProductName(desc);
+        await mergeRules.updateOne({ descricao_original_normalizada: descNorm }, { $set: { descricao_original: desc, descricao_original_normalizada: descNorm, nome_final: nomeFinal, nome_final_normalizado: nomeFinalNorm, product_id: prod._id, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+        await purchases.updateMany({ 'itens.descricao': desc, 'itens.descricao_original': { $exists: false } }, { $set: { 'itens.$[elem].descricao_original': desc } }, { arrayFilters: [{ 'elem.descricao': desc }] });
+        await purchases.updateMany({ 'itens.descricao': desc }, { $set: { 'itens.$[elem].descricao': nomeFinal, 'itens.$[elem].descricao_normalizada': nomeFinalNorm, 'itens.$[elem].product_id': prod._id } }, { arrayFilters: [{ 'elem.descricao': desc }] });
+      }
+      gruposMesclados++;
+      const set = new Set(descricoesOriginais);
+      atual = atual.filter(i => !set.has(i.descricao));
+    }
+
+    return res.json({ ok: true, grupos_mesclados: gruposMesclados });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth', authHandler);
+app.get('/api/auth', authHandler);
+
+app.post('/mesclar-produtos', requireAuth, async (req, res) => {
+  const { action, descricoes, nome_final, descricao_mesclada } = req.body || {};
+  const db = await getDb();
+  const purchases = db.collection('purchases');
+  const products = db.collection('products');
+  const mergeRules = db.collection('merge_rules');
+
+  if (action === 'unmerge') {
+    const pipeline = [{ $unwind: '$itens' }, { $match: { 'itens.descricao': descricao_mesclada, 'itens.descricao_original': { $exists: true } } }, { $group: { _id: null, originais: { $addToSet: '$itens.descricao_original' } } }];
+    const resAgg = await purchases.aggregate(pipeline).toArray();
+    if (resAgg.length === 0) return res.status(404).json({ error: 'Não encontrado' });
+    for (const desc of resAgg[0].originais) {
+      const dNorm = normalizeProductName(desc);
+      await products.updateOne({ nome_normalizado: dNorm }, { $set: { nome_original: desc, nome_normalizado: dNorm, updatedAt: new Date() } }, { upsert: true });
+      const p = await products.findOne({ nome_normalizado: dNorm });
+      await purchases.updateMany({ 'itens.descricao': descricao_mesclada, 'itens.descricao_original': desc }, { $set: { 'itens.$[elem].descricao': desc, 'itens.$[elem].descricao_normalizada': dNorm, 'itens.$[elem].product_id': p._id }, $unset: { 'itens.$[elem].descricao_original': "" } }, { arrayFilters: [{ 'elem.descricao': descricao_mesclada, 'elem.descricao_original': desc }] });
+    }
+    await mergeRules.deleteMany({ nome_final_normalizado: normalizeProductName(descricao_mesclada) });
+    return res.json({ ok: true });
+  }
+
+  const nomeFinal = nome_final.trim();
+  const nomeFinalNorm = normalizeProductName(nomeFinal);
+  await products.updateOne({ nome_normalizado: nomeFinalNorm }, { $set: { nome_original: nomeFinal, nome_normalizado: nomeFinalNorm, updatedAt: new Date() } }, { upsert: true });
+  const prod = await products.findOne({ nome_normalizado: nomeFinalNorm });
+
+  for (const desc of descricoes) {
+    await purchases.updateMany({ 'itens.descricao': desc, 'itens.descricao_original': { $exists: false } }, { $set: { 'itens.$[elem].descricao_original': desc } }, { arrayFilters: [{ 'elem.descricao': desc }] });
+    await purchases.updateMany({ 'itens.descricao': desc }, { $set: { 'itens.$[elem].descricao': nomeFinal, 'itens.$[elem].descricao_normalizada': nomeFinalNorm, 'itens.$[elem].product_id': prod._id }, }, { arrayFilters: [{ 'elem.descricao': desc }] });
+    if (normalizeProductName(desc) !== nomeFinalNorm) {
+      const dNorm = normalizeProductName(desc);
+      await mergeRules.updateOne({ descricao_original_normalizada: dNorm }, { $set: { descricao_original: desc, nome_final: nomeFinal, nome_final_normalizado: nomeFinalNorm, product_id: prod._id, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } }, { upsert: true });
+    }
+  }
+  return res.json({ ok: true });
+});
+
+app.get('/api/mesclar-produtos', requireAuth, async (req, res) => {
+  const db = await getDb();
+  const rules = await db.collection('merge_rules').find({}).toArray();
+  const groups = new Map();
+  for (const r of rules) {
+    if (!groups.has(r.nome_final_normalizado)) groups.set(r.nome_final_normalizado, { nome_final: r.nome_final, origens: [] });
+    groups.get(r.nome_final_normalizado).origens.push({ descricao: r.descricao_original });
+  }
+  return res.json({ ok: true, mesclagens: [...groups.values()] });
+});
+
+app.listen(port, () => console.log(`Rodando em http://localhost:${port}`));
