@@ -66,6 +66,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setTermoBuscado(termo);
     resetResultViews();
     setLoading(true);
+    setAutoMesclando(false);
     try {
       const data = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
       if (!data.sugestoes || data.sugestoes.length === 0) {
@@ -79,11 +80,20 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
 
       let lista = data.sugestoes;
 
-      if (lista.length === 1) {
-        await mostrarHistoricoProduto(lista[0].descricao);
-        return;
+      // ⭐ Aplica auto-merge nos itens encontrados
+      setAutoMesclando(true);
+      const { lista: listaMesclada, alguemFoiMesclado } = await autoMesclar(lista);
+      setAutoMesclando(false);
+
+      if (alguemFoiMesclado) {
+        setMensagem({
+          tone: 'success',
+          text: 'Alguns produtos foram mesclados automaticamente. Recarregue a lista para ver as alterações.'
+        });
+        setTimeout(() => setMensagem(null), 4000);
       }
-      setSugestoes({ lista, termo });
+
+      setSugestoes({ lista: listaMesclada, termo });
     } catch (err) {
       setError(err.message);
     } finally {
