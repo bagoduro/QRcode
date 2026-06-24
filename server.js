@@ -83,55 +83,40 @@ const parseItemRow = (row, $) => {
   };
 };
 
-// ─── AUTO-MERGE DE ITENS NOVOS (CORRIGIDO) ──────────────────────────────────
+// ─── AUTO-MERGE DE ITENS NOVOS (SEM LOGS) ──────────────────────────────────
 async function autoMergeNewItems(db, itensNovos) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
 
-  console.log(`[autoMergeNewItems] Processando ${itensNovos.length} itens...`);
-
   for (const item of itensNovos) {
     const descNorm = normalizeProductName(item.descricao);
 
-    // 1. Verifica se já existe regra para este item
+    // Verifica se já existe regra
     const existingRule = await mergeRules.findOne({
       descricao_original_normalizada: descNorm
     });
-    if (existingRule) {
-      console.log(`[autoMergeNewItems] Item "${item.descricao}" já tem regra, pulando.`);
-      continue;
-    }
+    if (existingRule) continue;
 
-    // 2. Busca todos os produtos (exceto ele mesmo)
+    // Busca todos os produtos (exceto ele mesmo) e filtra bloqueados
     const allProducts = await products.find({
-      nome_normalizado: { $ne: descNorm }
+      nome_normalizado: { $ne: descNorm },
+      block_auto_merge: { $ne: true }
     }).toArray();
 
-    console.log(`[autoMergeNewItems] Encontrados ${allProducts.length} produtos para comparar com "${item.descricao}"`);
+    if (allProducts.length === 0) continue;
 
-    // Filtra produtos bloqueados (não podem ser âncora)
-    const candidatos = allProducts.filter(p => p.block_auto_merge !== true);
-
-    if (candidatos.length === 0) {
-      console.log(`[autoMergeNewItems] Nenhum candidato disponível (todos bloqueados).`);
-      continue;
-    }
-
-    const fuse = new Fuse(candidatos, {
+    const fuse = new Fuse(allProducts, {
       keys: ['nome_original', 'nome_normalizado'],
-      threshold: 0.35, // Ajustei para ficar mais sensível
+      threshold: 0.4,
       includeScore: true,
       ignoreLocation: true,
     });
 
-    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.35);
-
-    console.log(`[autoMergeNewItems] Encontrados ${similares.length} similares para "${item.descricao}"`);
+    const similares = fuse.search(item.descricao).filter(r => r.score <= 0.4);
 
     if (similares.length > 0) {
       const ancora = similares[0].item;
-      console.log(`[autoMergeNewItems] Âncora escolhida: "${ancora.nome_original}" (score: ${similares[0].score})`);
 
       // Cria regra de mesclagem
       await mergeRules.updateOne(
@@ -158,7 +143,7 @@ async function autoMergeNewItems(db, itensNovos) {
       );
 
       // Atualiza todas as ocorrências desse item para o nome final
-      const updateResult = await purchases.updateMany(
+      await purchases.updateMany(
         { 'itens.descricao': item.descricao },
         {
           $set: {
@@ -169,10 +154,6 @@ async function autoMergeNewItems(db, itensNovos) {
         },
         { arrayFilters: [{ 'elem.descricao': item.descricao }] }
       );
-
-      console.log(`[autoMergeNewItems] Item "${item.descricao}" mesclado com "${ancora.nome_original}" (${updateResult.modifiedCount} ocorrências atualizadas)`);
-    } else {
-      console.log(`[autoMergeNewItems] Nenhum similar encontrado para "${item.descricao}"`);
     }
   }
 }
@@ -180,20 +161,19 @@ async function autoMergeNewItems(db, itensNovos) {
 // ─── SALVAR COMPRA ────────────────────────────────────────────────────────────
 const savePurchase = async (url, resultado) => {
   try {
-    console.log('[savePurchase] Iniciando salvamento...', { url });
     const db = await getDb();
     const purchases = db.collection('purchases');
     const mergeRules = db.collection('merge_rules');
 
     const existing = await purchases.findOne({ url });
     if (existing) {
-      console.log('[savePurchase] URL já registrada, ignorando duplicata.');
       return { duplicate: true };
     }
 
-    // Guarda os itens originais (antes de aplicar regras) para o auto‑merge posterior
+    // Guarda os itens originais para o auto‑merge posterior
     const itensOriginais = resultado.itens.map(item => ({ ...item }));
 
+    // Primeiro, aplica regras existentes e cria/atualiza produtos
     const regras = await mergeRules.find({}).toArray();
     const mapRegras = new Map(regras.map(r => [r.descricao_original_normalizada, r]));
 
@@ -236,11 +216,10 @@ const savePurchase = async (url, resultado) => {
       itens: itensEnriquecidos,
     };
 
-    const result = await purchases.insertOne(purchase);
-    console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
+    await purchases.insertOne(purchase);
 
     // ─── AUTO‑MERGE DE ITENS NOVOS ──────────────────────────────────────────
-    console.log('[savePurchase] Iniciando auto‑merge para itens novos...');
+    // Agora que todos os produtos já estão no banco, podemos comparar
     await autoMergeNewItems(db, itensOriginais);
 
     return { duplicate: false };
