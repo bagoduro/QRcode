@@ -2,12 +2,51 @@ import { getDb } from '../db.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // --- LISTAR MESCLAGENS JÁ REALIZADAS (para a aba de revisão) ---
+  if (req.method === 'GET') {
+    try {
+      const db = await getDb();
+      const mergeRules = db.collection('merge_rules');
+      const regras = await mergeRules.find({}).sort({ updatedAt: -1 }).toArray();
+
+      const grupos = new Map();
+      for (const r of regras) {
+        const key = r.nome_final_normalizado;
+        if (!grupos.has(key)) {
+          grupos.set(key, {
+            nome_final: r.nome_final,
+            atualizado_em: r.updatedAt || r.createdAt || null,
+            origens: [],
+          });
+        }
+        const grupo = grupos.get(key);
+        grupo.origens.push({
+          descricao: r.descricao_original,
+          mesclado_em: r.updatedAt || r.createdAt || null,
+        });
+        if (r.updatedAt && (!grupo.atualizado_em || r.updatedAt > grupo.atualizado_em)) {
+          grupo.atualizado_em = r.updatedAt;
+        }
+      }
+
+      const mesclagens = [...grupos.values()].sort(
+        (a, b) => new Date(b.atualizado_em || 0) - new Date(a.atualizado_em || 0)
+      );
+
+      return res.json({ ok: true, total: mesclagens.length, mesclagens });
+    } catch (err) {
+      console.error('[GET /api/mesclar-produtos] Erro:', err.message, err.stack);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Use POST /api/mesclar-produtos' });
+    return res.status(405).json({ error: 'Use GET ou POST /api/mesclar-produtos' });
   }
 
   const { action, descricoes, nome_final, descricao_mesclada } = req.body || {};

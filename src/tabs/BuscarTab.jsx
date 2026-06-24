@@ -3,6 +3,9 @@ import { Loading, EmptyState, Alert } from '../components/Feedback';
 import PriceChart from '../components/PriceChart';
 import { apiGet, apiPost } from '../lib/api';
 import { formatValor, formatPrecoUnitario, formatData } from '../lib/format';
+import { sugerirGrupoDuplicado } from '../lib/fuzzyMerge';
+
+const MAX_AUTO_MERGE_PASSES = 4;
 
 export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed }) {
   const [query, setQuery] = useState('');
@@ -12,6 +15,7 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
   const [sugestoes, setSugestoes] = useState(null); // { lista, termo }
   const [detalhe, setDetalhe] = useState(null); // { data, dataComp, termo }
   const [mensagem, setMensagem] = useState(null); // { tone, text }
+  const [autoMesclando, setAutoMesclando] = useState(false);
 
   useEffect(() => {
     if (!jumpToProduct) return;
@@ -29,6 +33,34 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
     setMensagem(null);
   }
 
+  // Mescla automaticamente, em sequência, todos os grupos de duplicados que o
+  // Fuse.js encontrar dentro da lista de sugestões. Roda silenciosamente — se
+  // alguma chamada falhar, simplesmente para e segue com o que já tem.
+  async function autoMesclar(lista) {
+    let atual = lista;
+    let alguemFoiMesclado = false;
+
+    for (let tentativa = 0; tentativa < MAX_AUTO_MERGE_PASSES; tentativa++) {
+      const grupo = sugerirGrupoDuplicado(atual);
+      if (!grupo) break;
+
+      try {
+        await apiPost('/mesclar-produtos', {
+          descricoes: grupo.itens.map((i) => i.descricao),
+          nome_final: grupo.ancora.descricao,
+        });
+        alguemFoiMesclado = true;
+      } catch {
+        break; // não trava a busca por causa de uma falha na mesclagem automática
+      }
+
+      const descartar = new Set(grupo.itens.map((i) => i.descricao));
+      atual = atual.filter((i) => !descartar.has(i.descricao));
+    }
+
+    return { lista: atual, alguemFoiMesclado };
+  }
+
   async function buscarPorTermo(termo) {
     if (!termo) return;
     setTermoBuscado(termo);
@@ -44,11 +76,31 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         await mostrarHistoricoProduto(data.sugestoes[0].descricao);
         return;
       }
-      setSugestoes({ lista: data.sugestoes, termo });
+
+      let lista = data.sugestoes;
+      if (isLoggedIn) {
+        setAutoMesclando(true);
+        const resultado = await autoMesclar(lista);
+        setAutoMesclando(false);
+        lista = resultado.lista;
+        if (resultado.alguemFoiMesclado) {
+          // Reconsulta o servidor pra refletir as contagens/preços já consolidados
+          setLoading(true);
+          const dataAtualizada = await apiGet('/historico-compras', { produto: termo, sugestoes: 'true' });
+          lista = dataAtualizada.sugestoes || lista;
+        }
+      }
+
+      if (lista.length === 1) {
+        await mostrarHistoricoProduto(lista[0].descricao);
+        return;
+      }
+      setSugestoes({ lista, termo });
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setAutoMesclando(false);
     }
   }
 
@@ -106,7 +158,17 @@ export default function BuscarTab({ isLoggedIn, jumpToProduct, onJumpConsumed })
         </div>
 
         <div className="result-area">
-          {loading && <Loading text={detalhe === null && sugestoes === null ? 'Buscando...' : 'Carregando histórico...'} />}
+          {loading && (
+            <Loading
+              text={
+                autoMesclando
+                  ? 'Verificando duplicados e mesclando automaticamente...'
+                  : detalhe === null && sugestoes === null
+                  ? 'Buscando...'
+                  : 'Carregando histórico...'
+              }
+            />
+          )}
           {!loading && error && <Alert tone="danger">{error}</Alert>}
           {!loading && mensagem?.tone === 'empty' && <EmptyState icon="ti-package-off" text={mensagem.text} />}
           {!loading && sugestoes && (
@@ -206,9 +268,16 @@ function Sugestoes({ lista, termo, isLoggedIn, onEscolher, onConcluido, setMensa
   return (
     <div>
       <div className="sugestoes-toolbar">
-        <p className="sugestao-titulo">
-          Encontrei <strong>{lista.length}</strong> produto{lista.length !== 1 ? 's' : ''} com &ldquo;<strong>{termo}</strong>&rdquo;. Qual você quer ver?
-        </p>
+        <div>
+          <p className="sugestao-titulo">
+            Encontrei <strong>{lista.length}</strong> produto{lista.length !== 1 ? 's' : ''} com &ldquo;<strong>{termo}</strong>&rdquo;. Qual você quer ver?
+          </p>
+          {isLoggedIn && (
+            <p className="helper sugestao-auto-hint">
+              <i className="ti ti-sparkles" aria-hidden="true" /> Duplicados parecidos já são mesclados automaticamente. Se sobrou algum, mescle manualmente abaixo.
+            </p>
+          )}
+        </div>
         <div className="sugestoes-toolbar-actions">
           {podeDesfazer && (
             <button className="btn-modo-mesclar" disabled={desfazendo} onClick={desfazerMesclagem}>

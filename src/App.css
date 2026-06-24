@@ -1370,6 +1370,38 @@ select:focus {
   margin: 0 0 1.25rem;
 }
 
+.sugestao-auto-hint {
+  margin: 4px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-text);
+}
+
+.mesclagem-card {
+  cursor: default;
+}
+
+.mesclagem-card:hover {
+  border-color: var(--border);
+}
+
+.mesclagem-origens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.mesclagem-origem-chip {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 3px 8px;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ════════════════════════════════════════════════════════════════════════ */

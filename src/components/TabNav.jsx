@@ -3,12 +3,15 @@ const TABS = [
   { id: 'buscar', label: 'Buscar item', icon: 'ti-search' },
   { id: 'recorrentes', label: 'Recorrentes', icon: 'ti-repeat' },
   { id: 'historico', label: 'Compras', icon: 'ti-receipt' },
+  { id: 'mesclagens', label: 'Mesclagens', icon: 'ti-git-merge', somenteLogado: true },
 ];
 
-export default function TabNav({ active, onChange }) {
+export default function TabNav({ active, onChange, isLoggedIn }) {
+  const tabs = TABS.filter((tab) => !tab.somenteLogado || isLoggedIn);
+
   return (
     <nav className="tabs" role="tablist">
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <button
           key={tab.id}
           role="tab"

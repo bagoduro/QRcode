@@ -6,6 +6,7 @@ import LeitorTab from './tabs/LeitorTab';
 import BuscarTab from './tabs/BuscarTab';
 import RecorrentesTab from './tabs/RecorrentesTab';
 import HistoricoTab from './tabs/HistoricoTab';
+import MesclagensTab from './tabs/MesclagensTab';
 import { authMe, clearToken, getToken } from './lib/api';
 import './App.css';
 
@@ -44,6 +45,7 @@ export default function App() {
   function handleLogout() {
     clearToken();
     setAuth({ loggedIn: false, username: '', checked: true });
+    if (activeTab === 'mesclagens') setActiveTab('buscar');
   }
 
   function handleVerProdutoRecorrente(descricao) {
@@ -55,7 +57,7 @@ export default function App() {
     <div className={`app ${auth.loggedIn ? 'autenticado' : ''}`}>
       <Header auth={auth} onOpenLogin={() => setShowAuthModal(true)} onLogout={handleLogout} />
 
-      <TabNav active={activeTab} onChange={setActiveTab} />
+      <TabNav active={activeTab} onChange={setActiveTab} isLoggedIn={auth.loggedIn} />
 
       {activeTab === 'leitor' && <LeitorTab />}
       {activeTab === 'buscar' && (
@@ -67,6 +69,7 @@ export default function App() {
       )}
       {activeTab === 'recorrentes' && <RecorrentesTab onVerProduto={handleVerProdutoRecorrente} />}
       {activeTab === 'historico' && <HistoricoTab />}
+      {activeTab === 'mesclagens' && auth.loggedIn && <MesclagensTab />}
 
       {showAuthModal && (
         <AuthModal onClose={() => setShowAuthModal(false)} onAuthenticated={handleAuthenticated} />
