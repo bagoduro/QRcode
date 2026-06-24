@@ -1,202 +1,92 @@
-import { useEffect, useRef, useState } from "react";
-import { Html5QrcodeScanner } from "html5-qrcode";
+import { useEffect, useState } from 'react';
+import Header from './components/Header';
+import TabNav from './components/TabNav';
+import AuthModal from './components/AuthModal';
+import LeitorTab from './tabs/LeitorTab';
+import BuscarTab from './tabs/BuscarTab';
+import RecorrentesTab from './tabs/RecorrentesTab';
+import HistoricoTab from './tabs/HistoricoTab';
+import { authMe, clearToken, getToken } from './lib/api';
+import './App.css';
 
-function App() {
-  const [scanResult, setScanResult] = useState(null);
-  const [nfeData, setNfeData] = useState(null);
-  const [error, setError] = useState(null);
-  const [manualUrl, setManualUrl] = useState("");
-  const lastScannedUrl = useRef(null);
-
-  const isValidUrl = (text) => {
-    try {
-      new URL(text);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const API_BASE = '/api';
-
-  const fetchNfe = async (url) => {
-    try {
-      setError(null);
-      const endpoint = API_BASE
-        ? `${API_BASE.replace(/\/$/, '')}/consulta-qrcode?url=${encodeURIComponent(url)}`
-        : `/api/consulta-qrcode?url=${encodeURIComponent(url)}`;
-
-      const response = await fetch(endpoint, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`Erro ${response.status}: ${body}`);
-      }
-
-      const json = await response.json();
-      setNfeData(json);
-      setError(null);
-    } catch (err) {
-      setNfeData(null);
-      setError(err.message);
-    }
-  };
+export default function App() {
+  const [activeTab, setActiveTab] = useState('leitor');
+  const [auth, setAuth] = useState({ loggedIn: false, username: '', checked: false });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [jumpToProduct, setJumpToProduct] = useState(null);
 
   useEffect(() => {
-    const scanner = new Html5QrcodeScanner(
-      "reader",
-      {
-        fps: 10,
-        qrbox: 250,
-      },
-      false
-    );
-
-    scanner.render(
-      (textoLido) => {
-        setScanResult(textoLido);
-
-        if (isValidUrl(textoLido) && textoLido !== lastScannedUrl.current) {
-          lastScannedUrl.current = textoLido;
-          fetchNfe(textoLido);
-        }
-      },
-      () => {
-        // Ignora erros de leitura
+    async function checkAuth() {
+      if (!getToken()) {
+        setAuth({ loggedIn: false, username: '', checked: true });
+        return;
       }
-    );
-
-    return () => {
-      scanner.clear().catch(() => {});
-    };
+      try {
+        const data = await authMe();
+        if (data.loggedIn) {
+          setAuth({ loggedIn: true, username: data.user.username, checked: true });
+        } else {
+          clearToken();
+          setAuth({ loggedIn: false, username: '', checked: true });
+        }
+      } catch {
+        setAuth({ loggedIn: false, username: '', checked: true });
+      }
+    }
+    checkAuth();
   }, []);
 
-  const handleReconsult = () => {
-    if (lastScannedUrl.current) fetchNfe(lastScannedUrl.current);
-  };
+  function handleAuthenticated(username) {
+    setAuth({ loggedIn: true, username, checked: true });
+    setShowAuthModal(false);
+  }
 
-  const handleManualConsult = () => {
-    if (manualUrl && isValidUrl(manualUrl)) {
-      lastScannedUrl.current = manualUrl;
-      fetchNfe(manualUrl);
-    } else {
-      setError('URL inválida.');
-    }
-  };
+  function handleLogout() {
+    clearToken();
+    setAuth({ loggedIn: false, username: '', checked: true });
+    if (activeTab === 'leitor') setActiveTab('buscar');
+  }
 
-  const clearAll = () => {
-    setScanResult(null);
-    setNfeData(null);
-    setError(null);
-    lastScannedUrl.current = null;
-    setManualUrl("");
-  };
+  function handleVerProdutoRecorrente(descricao) {
+    setJumpToProduct(descricao);
+    setActiveTab('buscar');
+  }
 
   return (
-    <div className="app-container">
-      <h1>📷 Leitor de QR Code</h1>
+    <div className={`app ${auth.loggedIn ? 'autenticado' : ''}`}>
+      <Header auth={auth} onOpenLogin={() => setShowAuthModal(true)} onLogout={handleLogout} />
 
-      <div id="reader" className="reader-container" />
+      <TabNav active={activeTab} onChange={setActiveTab} />
 
-      <div className="info-row">
-        <div className="last-read">
-          <h3>Último conteúdo lido</h3>
-          <p className="mono">{scanResult || "Aguardando leitura..."}</p>
-        </div>
-
-        <div className="actions">
-          <button onClick={handleReconsult} disabled={!lastScannedUrl.current} className="btn">
-            Reconsultar
-          </button>
-          <button onClick={clearAll} className="btn btn-ghost">
-            Limpar
-          </button>
-        </div>
-      </div>
-
-      <div className="manual-consult">
-        <input
-          value={manualUrl}
-          onChange={(e) => setManualUrl(e.target.value)}
-          placeholder="Cole a URL do QR Code aqui"
+      {activeTab === 'leitor' && (auth.loggedIn ? <LeitorTab /> : <LoginRequired onLogin={() => setShowAuthModal(true)} />)}
+      {activeTab === 'buscar' && (
+        <BuscarTab
+          isLoggedIn={auth.loggedIn}
+          jumpToProduct={jumpToProduct}
+          onJumpConsumed={() => setJumpToProduct(null)}
         />
-        <button onClick={handleManualConsult} className="btn">
-          Consultar
-        </button>
-      </div>
+      )}
+      {activeTab === 'recorrentes' && <RecorrentesTab onVerProduto={handleVerProdutoRecorrente} />}
+      {activeTab === 'historico' && <HistoricoTab />}
 
-      {error && <div className="error">Erro: {error}</div>}
-
-      {nfeData && (
-        <div className="nfe-card">
-          <h2>Dados NFC-e</h2>
-
-          <section className="section">
-            <h4>Emitente</h4>
-            <div className="grid">
-              <div><strong>Nome:</strong> {nfeData.emitente?.nome || '-'}</div>
-              <div><strong>CNPJ:</strong> {nfeData.emitente?.cnpj || '-'}</div>
-              <div><strong>IE:</strong> {nfeData.emitente?.inscricao_estadual || '-'}</div>
-              <div><strong>UF:</strong> {nfeData.emitente?.uf || '-'}</div>
-            </div>
-          </section>
-
-          <section className="section">
-            <h4>Nota</h4>
-            <div className="grid">
-              <div><strong>Modelo:</strong> {nfeData.nota?.modelo || '-'}</div>
-              <div><strong>Série:</strong> {nfeData.nota?.serie || '-'}</div>
-              <div><strong>Número:</strong> {nfeData.nota?.numero || '-'}</div>
-              <div><strong>Emissão:</strong> {nfeData.nota?.data_emissao || '-'}</div>
-              <div><strong>Valor total serviço:</strong> {nfeData.nota?.valor_total_servico || '-'}</div>
-              <div><strong>Protocolo:</strong> {nfeData.nota?.protocolo || '-'}</div>
-            </div>
-          </section>
-
-          <section className="section">
-            <h4>Totais</h4>
-            <div className="grid">
-              <div><strong>Qtde total itens:</strong> {nfeData.totais?.quantidade_total_itens || '-'}</div>
-              <div><strong>Valor total:</strong> {nfeData.totais?.valor_total || '-'}</div>
-              <div><strong>Pago:</strong> {nfeData.totais?.valor_pago || '-'}</div>
-              <div><strong>Pagamento:</strong> {nfeData.totais?.forma_pagamento || '-'}</div>
-            </div>
-          </section>
-
-          <section className="section">
-            <h4>Itens</h4>
-            <div className="table-wrap">
-              <table className="nfe-table">
-                <thead>
-                  <tr>
-                    <th>Descrição</th>
-                    <th>Código</th>
-                    <th>Qtd</th>
-                    <th>UN</th>
-                    <th>Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.isArray(nfeData.itens) && nfeData.itens.map((it, idx) => (
-                    <tr key={idx}>
-                      <td>{it.descricao}</td>
-                      <td>{it.codigo}</td>
-                      <td>{it.quantidade}</td>
-                      <td>{it.unidade}</td>
-                      <td>{it.valor_total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
+      {showAuthModal && (
+        <AuthModal onClose={() => setShowAuthModal(false)} onAuthenticated={handleAuthenticated} />
       )}
     </div>
   );
 }
 
-export default App;
+function LoginRequired({ onLogin }) {
+  return (
+    <section className="panel active">
+      <div className="card login-required">
+        <i className="ti ti-lock" aria-hidden="true" />
+        <h2>Entre para escanear notas</h2>
+        <p>Crie uma conta ou faça login para ler QR codes e salvar suas notas fiscais.</p>
+        <button className="btn primary" onClick={onLogin}>
+          <i className="ti ti-login" aria-hidden="true" /> Entrar / Criar conta
+        </button>
+      </div>
+    </section>
+  );
+}
