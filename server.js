@@ -38,11 +38,12 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// ─── UPSERT PRIORIZA O NOME NORMALIZADO ──────────────────────────────────────
+// ─── UPSERT COM BUSCA FUZZY ──────────────────────────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
+  // 1. Busca exata por nome_normalizado
   let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
   if (existing) {
     await products.updateOne(
@@ -52,6 +53,39 @@ const upsertProduct = async (db, item) => {
     return existing._id;
   }
 
+  // 2. Busca fuzzy por similaridade (threshold 0.4)
+  const allProducts = await products.find({
+    block_auto_merge: { $ne: true }
+  }).toArray();
+
+  if (allProducts.length > 0) {
+    const fuse = new Fuse(allProducts, {
+      keys: ['nome_original', 'nome_normalizado'],
+      threshold: 0.4,
+      includeScore: true,
+      ignoreLocation: true,
+    });
+    const resultados = fuse.search(item.descricao)
+      .filter(r => r.score <= 0.4)
+      .sort((a, b) => a.score - b.score);
+
+    if (resultados.length > 0) {
+      const melhor = resultados[0];
+      const similar = melhor.item;
+      console.log(`[upsertProduct] Usando produto existente similar: "${similar.nome_original}" (score: ${melhor.score}) para "${item.descricao}"`);
+      
+      await products.updateOne(
+        { _id: similar._id },
+        { 
+          $set: { updatedAt: new Date() },
+          $addToSet: { codigos: item.codigo }
+        }
+      );
+      return similar._id;
+    }
+  }
+
+  // 3. Nenhum similar encontrado: cria novo
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
@@ -60,6 +94,7 @@ const upsertProduct = async (db, item) => {
     updatedAt: new Date(),
   };
   const result = await products.insertOne(doc);
+  console.log(`[upsertProduct] Criado novo produto: "${item.descricao}"`);
   return result.insertedId;
 };
 
@@ -81,7 +116,7 @@ const parseItemRow = (row, $) => {
   };
 };
 
-// ─── FUNÇÃO AUXILIAR PARA CRIAR REGRA DE MESCLAGEM ──────────────────────────
+// ─── FUNÇÃO AUXILIAR PARA CRIAR REGRA DE MESCLAGEM (mantida para compatibilidade) ──
 async function criarRegraEMesclar(db, item, ancora, descNorm) {
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
@@ -121,77 +156,7 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── AUTO-MERGE IDÊNTICO À BUSCA DO FRONTEND ────────────────────────────────
-async function autoMergeNewItems(db, itensNovos) {
-  const products = db.collection('products');
-  const mergeRules = db.collection('merge_rules');
-  const purchases = db.collection('purchases');
-
-  for (const item of itensNovos) {
-    const descNorm = normalizeProductName(item.descricao);
-    console.log(`[autoMerge] Processando: "${item.descricao}"`);
-
-    // Já existe regra?
-    const existingRule = await mergeRules.findOne({
-      descricao_original_normalizada: descNorm
-    });
-    if (existingRule) {
-      console.log(`[autoMerge] Já tem regra, pulando.`);
-      continue;
-    }
-
-    // Produto atual
-    const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
-    if (!produtoAtual) {
-      console.log(`[autoMerge] Produto não encontrado.`);
-      continue;
-    }
-
-    // Busca todos os produtos (exceto bloqueados e o atual)
-    const allProducts = await products.find({
-      _id: { $ne: produtoAtual._id },
-      block_auto_merge: { $ne: true }
-    }).toArray();
-
-    if (allProducts.length === 0) {
-      console.log(`[autoMerge] Nenhum outro produto.`);
-      continue;
-    }
-
-    // EXATAMENTE A MESMA CONFIGURAÇÃO DO FRONTEND (BuscarTab.jsx)
-    const fuse = new Fuse(allProducts, {
-      keys: ['nome_original', 'nome_normalizado'],
-      threshold: 0.4,        // mesmo do frontend
-      includeScore: true,
-      ignoreLocation: true,
-    });
-
-    const resultados = fuse.search(item.descricao)
-      .filter(r => r.score <= 0.4)
-      .sort((a, b) => a.score - b.score);
-
-    console.log(`[autoMerge] Encontrados ${resultados.length} similares.`);
-
-    if (resultados.length === 0) continue;
-
-    const melhor = resultados[0];
-    const ancora = melhor.item;
-    console.log(`[autoMerge] Melhor: "${ancora.nome_original}" (score: ${melhor.score})`);
-
-    // Cria regra
-    await criarRegraEMesclar(db, item, ancora, descNorm);
-
-    // Bloqueia o atual
-    await products.updateOne(
-      { _id: produtoAtual._id },
-      { $set: { block_auto_merge: true } }
-    );
-
-    console.log(`[autoMerge] Mesclado: "${item.descricao}" → "${ancora.nome_original}"`);
-  }
-}
-
-// ─── SALVAR COMPRA ────────────────────────────────────────────────────────────
+// ─── SALVAR COMPRA (SEM AUTO-MERGE) ──────────────────────────────────────────
 const savePurchase = async (url, resultado) => {
   try {
     const db = await getDb();
@@ -246,8 +211,6 @@ const savePurchase = async (url, resultado) => {
     };
 
     await purchases.insertOne(purchase);
-    await autoMergeNewItems(db, itensOriginais);
-
     return { duplicate: false };
   } catch (error) {
     console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
