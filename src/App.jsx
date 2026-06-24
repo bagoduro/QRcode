@@ -44,7 +44,6 @@ export default function App() {
   function handleLogout() {
     clearToken();
     setAuth({ loggedIn: false, username: '', checked: true });
-    if (activeTab === 'leitor') setActiveTab('buscar');
   }
 
   function handleVerProdutoRecorrente(descricao) {
@@ -58,7 +57,7 @@ export default function App() {
 
       <TabNav active={activeTab} onChange={setActiveTab} />
 
-      {activeTab === 'leitor' && (auth.loggedIn ? <LeitorTab /> : <LoginRequired onLogin={() => setShowAuthModal(true)} />)}
+      {activeTab === 'leitor' && <LeitorTab />}
       {activeTab === 'buscar' && (
         <BuscarTab
           isLoggedIn={auth.loggedIn}
@@ -73,20 +72,5 @@ export default function App() {
         <AuthModal onClose={() => setShowAuthModal(false)} onAuthenticated={handleAuthenticated} />
       )}
     </div>
-  );
-}
-
-function LoginRequired({ onLogin }) {
-  return (
-    <section className="panel active">
-      <div className="card login-required">
-        <i className="ti ti-lock" aria-hidden="true" />
-        <h2>Entre para escanear notas</h2>
-        <p>Crie uma conta ou faça login para ler QR codes e salvar suas notas fiscais.</p>
-        <button className="btn primary" onClick={onLogin}>
-          <i className="ti ti-login" aria-hidden="true" /> Entrar / Criar conta
-        </button>
-      </div>
-    </section>
   );
 }
