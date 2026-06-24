@@ -1,7 +1,7 @@
 import { getDb } from '../db.js';
 import Fuse from 'fuse.js';
 
-const DEFAULT_THRESHOLD = 0.5; // <-- alterado de 0.4 para 0.5
+const DEFAULT_THRESHOLD = 0.4;
 
 function normalizeProductName(text = '') {
   return text
@@ -12,8 +12,13 @@ function normalizeProductName(text = '') {
     .trim();
 }
 
+/**
+ * Procura, dentro de uma lista de sugestões de produto,
+ * o maior grupo de descrições que são variações/typos do mesmo produto.
+ */
 function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
+
   const restante = [...lista];
   let melhorGrupo = null;
 
@@ -52,7 +57,9 @@ function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
+  // Proteção por senha
   const secret = process.env.MIGRATE_SECRET;
+  
   if (!secret) {
     return res.status(500).json({ error: 'Configuração ausente: A variável de ambiente MIGRATE_SECRET não foi definida no servidor.' });
   }
@@ -71,6 +78,7 @@ export default async function handler(req, res) {
     const products   = db.collection('products');
     const mergeRules = db.collection('merge_rules');
 
+    // 1. Agrupar todos os produtos distintos do banco de compras para encontrar duplicados
     const pipeline = [
       { $unwind: '$itens' },
       {
@@ -93,6 +101,7 @@ export default async function handler(req, res) {
     let totalRegrasCriadas = 0;
     let totalNotasAtualizadas = 0;
 
+    // 2. Rodar Fuse.js repetidamente até não encontrar mais grupos óbvios
     let atual = listaParaFuse;
     while (true) {
       const grupo = sugerirGrupoDuplicado(atual);
@@ -102,6 +111,7 @@ export default async function handler(req, res) {
       const nomeFinalNorm = normalizeProductName(nomeFinal);
       const descricoesOriginais = grupo.itens.map(i => i.descricao);
 
+      // Criar/Atualizar o produto canônico
       await products.updateOne(
         { nome_normalizado: nomeFinalNorm },
         {
@@ -116,11 +126,13 @@ export default async function handler(req, res) {
       );
       const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
 
+      // Atualizar compras e criar regras
       for (const descOriginal of descricoesOriginais) {
         if (normalizeProductName(descOriginal) === nomeFinalNorm) continue;
 
         const descOrigNorm = normalizeProductName(descOriginal);
 
+        // Salvar regra de auto-merge
         await mergeRules.updateOne(
           { descricao_original_normalizada: descOrigNorm },
           {
@@ -138,6 +150,7 @@ export default async function handler(req, res) {
         );
         totalRegrasCriadas++;
 
+        // Atualizar notas que contenham esse item (preservando o original se necessário)
         await purchases.updateMany(
           { 'itens.descricao': descOriginal, 'itens.descricao_original': { $exists: false } },
           { $set: { 'itens.$[elem].descricao_original': descOriginal } },
@@ -159,6 +172,8 @@ export default async function handler(req, res) {
       }
 
       gruposMesclados++;
+      
+      // Remover os itens processados da lista para a próxima iteração
       const descricoesNoGrupo = new Set(descricoesOriginais);
       atual = atual.filter(i => !descricoesNoGrupo.has(i.descricao));
     }
