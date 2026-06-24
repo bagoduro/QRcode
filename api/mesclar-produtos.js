@@ -67,7 +67,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
       }
 
-      // 1. Buscar a regra de mesclagem correspondente para obter o nome normalizado
+      // 1. Buscar a regra de mesclagem correspondente
       let regra = await mergeRules.findOne({ nome_final: descricao_mesclada });
       if (!regra) {
         const descNorm = norm(descricao_mesclada);
@@ -77,14 +77,14 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Regra de mesclagem não encontrada para esta descrição.' });
       }
 
-      const nomeFinalNorm = regra.nome_final_normalizado;
+      const nomeFinal = regra.nome_final; // Nome exato usado nos itens
 
-      // 2. Agora busca os itens que têm essa descrição normalizada (case-insensitive e sem diferenças de formatação)
+      // 2. Buscar itens que tenham este nome final (case‑insensitive) e que tenham descricao_original
       const pipeline = [
         { $unwind: '$itens' },
         {
           $match: {
-            'itens.descricao_normalizada': nomeFinalNorm,
+            'itens.descricao': { $regex: `^${nomeFinal}$`, $options: 'i' },
             'itens.descricao_original': { $exists: true }
           }
         },
@@ -107,6 +107,7 @@ export default async function handler(req, res) {
       for (const descOriginal of descricoesOriginais) {
         const descNorm = norm(descOriginal);
 
+        // Recria o produto original
         await products.updateOne(
           { nome_normalizado: descNorm },
           {
@@ -121,9 +122,10 @@ export default async function handler(req, res) {
         );
         const prodOriginal = await products.findOne({ nome_normalizado: descNorm });
 
+        // Atualiza os itens que têm esse nome final e descricao_original
         const updateResult = await purchases.updateMany(
           {
-            'itens.descricao_normalizada': nomeFinalNorm,
+            'itens.descricao': { $regex: `^${nomeFinal}$`, $options: 'i' },
             'itens.descricao_original': descOriginal
           },
           {
@@ -136,13 +138,13 @@ export default async function handler(req, res) {
               'itens.$[elem].descricao_original': ""
             }
           },
-          { arrayFilters: [{ 'elem.descricao_normalizada': nomeFinalNorm, 'elem.descricao_original': descOriginal }] }
+          { arrayFilters: [{ 'elem.descricao_original': descOriginal }] }
         );
         totalRestaurados += updateResult.modifiedCount;
       }
 
-      // Remove as regras de auto-merge referentes a esta mesclagem
-      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
+      // Remove as regras de mesclagem
+      await mergeRules.deleteMany({ nome_final_normalizado: regra.nome_final_normalizado });
 
       return res.json({
         ok: true,
