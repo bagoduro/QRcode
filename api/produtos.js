@@ -2,6 +2,9 @@ import { getDb } from '../db.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { bloqueados } = req.query; // true ou false
   const filter = bloqueados === 'true' ? { block_auto_merge: true } : { block_auto_merge: false };
