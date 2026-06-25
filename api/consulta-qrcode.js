@@ -5,8 +5,9 @@ import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
 const FUZZY_THRESHOLD = 0.5;
-const CLUSTER_THRESHOLD = 0.5;
-const MAX_GROUP_SIZE = 10;
+const CLUSTER_THRESHOLD = 0.35; // REDUZIDO para evitar falsos positivos
+const MAX_GROUP_SIZE = 6;
+const PALAVRAS_GENERICAS = new Set(['kg', 'g', 'ml', 'l', 'un', 'com', 'c/', 's/', 'de', 'da', 'do', 'das', 'dos']);
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -20,7 +21,25 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// ─── FUNÇÃO DE CLUSTERIZAÇÃO ────────────────────────────────────────────────
+// ─── EXTRAI PALAVRAS-CHAVE RELEVANTES ────────────────────────────────────────
+function extrairPalavrasChave(texto) {
+  const palavras = texto.toLowerCase().split(/\s+/);
+  return palavras
+    .filter(p => p.length >= 3) // ignora palavras muito curtas
+    .filter(p => !PALAVRAS_GENERICAS.has(p)) // ignora genéricas
+    .filter(p => !/^\d+$/.test(p)); // ignora números
+}
+
+// ─── VERIFICA SE DOIS PRODUTOS SÃO REALMENTE SIMILARES (PALAVRAS-CHAVE) ──────
+function saoProdutosSimilares(desc1, desc2) {
+  const palavras1 = extrairPalavrasChave(desc1);
+  const palavras2 = extrairPalavrasChave(desc2);
+  if (palavras1.length === 0 || palavras2.length === 0) return false;
+  // Pelo menos uma palavra-chave em comum
+  return palavras1.some(p => palavras2.includes(p));
+}
+
+// ─── FUNÇÃO DE CLUSTERIZAÇÃO COM VERIFICAÇÃO DE PALAVRAS-CHAVE ──────────────
 function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
   const restante = [...lista];
@@ -37,10 +56,17 @@ function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
     const achados = fuse.search(ancora.descricao)
       .filter(r => r.score <= threshold)
       .map(r => r.item);
-    if (achados.length >= 2 && achados.length <= MAX_GROUP_SIZE) {
-      const grupo = { ancora, itens: achados };
+
+    // 🔥 FILTRO EXTRA: só aceita se compartilharem palavras-chave
+    const filtrados = achados.filter(item =>
+      saoProdutosSimilares(ancora.descricao, item.descricao)
+    );
+
+    if (filtrados.length >= 2 && filtrados.length <= MAX_GROUP_SIZE) {
+      const grupo = { ancora, itens: filtrados };
       if (!melhor || grupo.itens.length > melhor.itens.length) melhor = grupo;
     }
+
     const descartar = new Set([ancora.descricao, ...achados.map(i => i.descricao)]);
     for (let i = restante.length - 1; i >= 0; i--) {
       if (descartar.has(restante[i].descricao)) restante.splice(i, 1);
@@ -93,7 +119,7 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── MESCLAR GRUPO INTEIRO (CLUSTERIZAÇÃO) ──────────────────────────────────
+// ─── MESCLAR GRUPO ──────────────────────────────────────────────────────────
 async function mesclarGrupo(db, grupo) {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
@@ -159,13 +185,11 @@ async function agruparProdutosSimilares(db, itensDaNota) {
   const products = db.collection('products');
   const purchases = db.collection('purchases');
 
-  // Para cada item da nota, busca produtos similares no banco
   for (const item of itensDaNota) {
     const descNorm = normalizeProductName(item.descricao);
     const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
     if (!produtoAtual) continue;
 
-    // Busca todos os produtos (exceto bloqueados e o atual)
     const allProducts = await products.find({
       _id: { $ne: produtoAtual._id },
       block_auto_merge: { $ne: true }
@@ -173,7 +197,6 @@ async function agruparProdutosSimilares(db, itensDaNota) {
 
     if (allProducts.length === 0) continue;
 
-    // Contagem de compras para ordenação
     const contagem = await purchases.aggregate([
       { $unwind: '$itens' },
       { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
@@ -195,21 +218,20 @@ async function agruparProdutosSimilares(db, itensDaNota) {
       }))
     ];
 
-    const grupo = sugerirGrupoDuplicado(lista, 0.5);
+    const grupo = sugerirGrupoDuplicado(lista, CLUSTER_THRESHOLD);
     if (grupo && grupo.itens.length >= 2) {
-      console.log(`[cluster] Grupo encontrado com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
+      console.log(`[cluster] Grupo com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
       await mesclarGrupo(db, grupo);
     }
   }
 }
 
-// ─── UPSERT (SEM CRIAÇÃO DE REGRA NO EXATO) ──────────────────────────────────
+// ─── UPSERT ──────────────────────────────────────────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
-  // 1. Busca exata → reutiliza SEM criar regra
   let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
   if (existing) {
     await products.updateOne({ _id: existing._id }, { $set: { updatedAt: new Date() } });
@@ -217,7 +239,6 @@ const upsertProduct = async (db, item) => {
     return existing._id;
   }
 
-  // 2. Busca fuzzy → reutiliza E CRIA REGRA
   const allProducts = await products.find({ block_auto_merge: { $ne: true } }).toArray();
   console.log(`[upsert] 🔍 Total de produtos disponíveis para fuzzy: ${allProducts.length}`);
 
@@ -248,7 +269,6 @@ const upsertProduct = async (db, item) => {
         { $set: { updatedAt: new Date() } }
       );
 
-      // Cria regra no fuzzy
       const descNorm = normalizeProductName(item.descricao);
       const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
       if (!existingRule) {
@@ -259,7 +279,6 @@ const upsertProduct = async (db, item) => {
     }
   }
 
-  // 3. Nenhum similar: cria novo (sem regra)
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
@@ -327,12 +346,10 @@ const savePurchase = async (url, resultado) => {
     await purchases.insertOne(purchase);
     console.log('[savePurchase] Nota salva com sucesso.');
 
-    // 🔥 AGORA, APÓS SALVAR, AGRUPA PRODUTOS SIMILARES (CLUSTERIZAÇÃO)
-    // Isso vai mesclar os três leites mesmo que todos já existam exatos
     try {
       await agruparProdutosSimilares(db, resultado.itens);
     } catch (err) {
-      console.error('[savePurchase] Erro na clusterização pós-salvamento:', err.message);
+      console.error('[savePurchase] Erro na clusterização:', err.message);
     }
 
     return { duplicate: false };
