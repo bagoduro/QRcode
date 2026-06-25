@@ -10,12 +10,23 @@ export default function PriceChart({ historico }) {
 
     const crescente = [...historico].reverse();
     const labels = crescente.map((h) => {
-      const d = h.data_compra ? new Date(h.data_compra) : null;
+      // Tenta usar data_compra; se inválida, usa createdAt como fallback
+      let d = h.data_compra ? new Date(h.data_compra) : null;
+      if (!d || isNaN(d)) {
+        d = h.createdAt ? new Date(h.createdAt) : null;
+      }
       return d && !isNaN(d) ? d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '?';
     });
+
     const valores = crescente.map((h) => {
-      const v = h.preco_unitario ?? parseFloat(String(h.valor_total).replace(/[^\d,]/g, '').replace(',', '.'));
-      return Number.isNaN(v) ? null : v;
+      // Tenta pegar preco_unitario; senão, extrai do valor_total
+      let v = h.preco_unitario;
+      if (v == null && h.valor_total) {
+        // Remove tudo que não é dígito, vírgula ou ponto, depois substitui vírgula por ponto
+        const limpo = String(h.valor_total).replace(/[^\d,]/g, '').replace(',', '.');
+        v = parseFloat(limpo);
+      }
+      return Number.isFinite(v) ? v : null;
     });
 
     const corLinha = '#1D9E75';
@@ -45,12 +56,18 @@ export default function PriceChart({ historico }) {
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: (ctx) => `R$ ${Number(ctx.parsed.y).toFixed(2).replace('.', ',')}`,
+              label: (ctx) => {
+                const valor = ctx.parsed.y;
+                return valor != null ? `R$ ${Number(valor).toFixed(2).replace('.', ',')}` : 'Valor indisponível';
+              },
             },
           },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 11 } },
+          },
           y: {
             grid: { color: 'rgba(128,128,128,0.15)' },
             ticks: {
