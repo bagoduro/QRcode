@@ -4,8 +4,8 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.6; // aumentado para capturar mais variações
-const CLUSTER_TIMEOUT = 3000; // 3 segundos máximo para clusterização
+const FUZZY_THRESHOLD = 0.8; // aumentado para capturar mais variações
+const CLUSTER_TIMEOUT = 3000;
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -92,23 +92,24 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── UPSERT COM BUSCA FUZZY + FALLBACK DE CLUSTERIZAÇÃO ─────────────────────
+// ─── UPSERT COM BUSCA FUZZY + LOGS DETALHADOS ─────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
-  const purchases = db.collection('purchases');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
   // 1. Busca exata
   let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
   if (existing) {
     await products.updateOne({ _id: existing._id }, { $set: { updatedAt: new Date() } });
-    console.log(`[upsert] Exato: "${item.descricao}" → "${existing.nome_original}"`);
+    console.log(`[upsert] ✅ Exato: "${item.descricao}" → "${existing.nome_original}"`);
     return existing._id;
   }
 
-  // 2. Busca fuzzy
+  // 2. Busca fuzzy com logs detalhados
   const allProducts = await products.find({ block_auto_merge: { $ne: true } }).toArray();
+  console.log(`[upsert] 🔍 Total de produtos disponíveis para fuzzy: ${allProducts.length}`);
+
   if (allProducts.length > 0) {
     const fuse = new Fuse(allProducts, {
       keys: ['nome_original', 'nome_normalizado'],
@@ -116,14 +117,27 @@ const upsertProduct = async (db, item) => {
       includeScore: true,
       ignoreLocation: true,
     });
+
+    // Busca usando a descrição original (mais rica)
     const resultados = fuse.search(item.descricao)
       .filter(r => r.score <= FUZZY_THRESHOLD)
       .sort((a, b) => a.score - b.score);
 
-    console.log(`[upsert] Fuzzy: "${item.descricao}" → ${resultados.length} candidatos`);
+    console.log(`[upsert] 🎯 Fuzzy: "${item.descricao}" → ${resultados.length} candidatos encontrados`);
+
+    // Mostra os 5 melhores candidatos com seus scores
+    if (resultados.length > 0) {
+      console.log(`[upsert] 📊 Top 5 candidatos:`);
+      resultados.slice(0, 5).forEach((r, i) => {
+        console.log(`  ${i+1}. "${r.item.nome_original}" (score: ${r.score.toFixed(4)})`);
+      });
+    } else {
+      console.log(`[upsert] ⚠️ Nenhum candidato com score <= ${FUZZY_THRESHOLD}`);
+    }
+
     if (resultados.length > 0) {
       const similar = resultados[0].item;
-      console.log(`[upsert] Melhor: "${similar.nome_original}" (score: ${resultados[0].score})`);
+      console.log(`[upsert] 🏆 Melhor: "${similar.nome_original}" (score: ${resultados[0].score.toFixed(4)})`);
 
       await products.updateOne(
         { _id: similar._id },
@@ -135,18 +149,15 @@ const upsertProduct = async (db, item) => {
       const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
       if (!existingRule) {
         await criarRegraEMesclar(db, item, similar, descNorm);
-        console.log(`[upsert] Regra criada via fuzzy`);
+        console.log(`[upsert] 📝 Regra criada via fuzzy: "${item.descricao}" → "${similar.nome_original}"`);
+      } else {
+        console.log(`[upsert] 📝 Regra já existia para "${item.descricao}"`);
       }
       return similar._id;
     }
   }
 
-  // 3. Fallback: tenta clusterização com os itens da própria nota (se houver mais de 1 item)
-  //    Isso pode unificar itens que são variações dentro da mesma nota.
-  //    Mas vamos fazer isso apenas se houver mais de 1 item na nota e o fuzzy não achou nada.
-  //    Para isso, precisamos do array de itens da nota – mas aqui não temos. Vamos pular.
-
-  // 4. Nenhum similar: cria novo
+  // 3. Nenhum similar: cria novo
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
@@ -155,7 +166,7 @@ const upsertProduct = async (db, item) => {
     updatedAt: new Date(),
   };
   const result = await products.insertOne(doc);
-  console.log(`[upsert] Criado novo produto: "${item.descricao}"`);
+  console.log(`[upsert] 🆕 Criado novo produto: "${item.descricao}"`);
   return result.insertedId;
 };
 
