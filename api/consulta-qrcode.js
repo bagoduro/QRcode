@@ -253,7 +253,7 @@ async function autoMergeNovosItens(db, itensNovos) {
   }
 }
 
-// ─── SALVAR COMPRA ──────────────────────────────────────────────────────────
+// ─── SALVAR COMPRA (COM AUTO-MERGE EM BACKGROUND) ──────────────────────────
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando...', { url });
@@ -365,11 +365,13 @@ const savePurchase = async (url, resultado) => {
     await purchases.insertOne(purchase);
     console.log('[savePurchase] Nota salva.');
 
-    try {
-      await autoMergeNovosItens(db, itensOriginais);
-    } catch (err) {
-      console.error('[savePurchase] Erro no auto-merge:', err.message);
-    }
+    // 🔥 AUTO-MERGE EM BACKGROUND (NÃO BLOQUEIA A RESPOSTA)
+    // O cliente recebe a resposta imediatamente, o merge roda depois
+    setImmediate(() => {
+      autoMergeNovosItens(db, itensOriginais).catch(err => {
+        console.error('[savePurchase] Erro no auto-merge em background:', err.message);
+      });
+    });
 
     const autoMerged = itensEnriquecidos.filter(i => i.descricao_original).length;
     return { duplicate: false, auto_merged: autoMerged, fuzzy_merged: fuzzyMergedCount };
