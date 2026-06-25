@@ -4,8 +4,9 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.8; // aumentado para capturar mais variações
-const CLUSTER_TIMEOUT = 3000;
+const FUZZY_THRESHOLD = 0.5; // mais tolerante para clusterização
+const CLUSTER_THRESHOLD = 0.5; // mesmo para agrupar similares
+const MAX_GROUP_SIZE = 10; // máximo de itens por grupo
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -19,8 +20,8 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// ─── FUNÇÃO DE CLUSTERIZAÇÃO SIMPLES (FALLBACK) ────────────────────────────
-function sugerirGrupoDuplicadoSimples(lista, threshold = 0.4) {
+// ─── FUNÇÃO DE CLUSTERIZAÇÃO (AGRUPAMENTO) ────────────────────────────────
+function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
   const restante = [...lista];
   let melhor = null;
@@ -36,7 +37,7 @@ function sugerirGrupoDuplicadoSimples(lista, threshold = 0.4) {
     const achados = fuse.search(ancora.descricao)
       .filter(r => r.score <= threshold)
       .map(r => r.item);
-    if (achados.length >= 2 && achados.length <= 5) {
+    if (achados.length >= 2 && achados.length <= MAX_GROUP_SIZE) {
       const grupo = { ancora, itens: achados };
       if (!melhor || grupo.itens.length > melhor.itens.length) melhor = grupo;
     }
@@ -92,10 +93,75 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── UPSERT COM BUSCA FUZZY + LOGS DETALHADOS ─────────────────────────────
+// ─── MESCLAR GRUPO INTEIRO (CLUSTERIZAÇÃO) ──────────────────────────────────
+async function mesclarGrupo(db, grupo) {
+  const products = db.collection('products');
+  const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
+
+  const ancora = grupo.ancora;
+  const itens = grupo.itens;
+
+  for (const item of itens) {
+    if (item._id.toString() === ancora._id.toString()) continue;
+    const descOriginal = item.descricao;
+    const descNorm = normalizeProductName(descOriginal);
+
+    // Cria regra para este item apontando para a âncora
+    const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
+    if (!existingRule) {
+      await mergeRules.updateOne(
+        { descricao_original_normalizada: descNorm },
+        {
+          $set: {
+            descricao_original: descOriginal,
+            descricao_original_normalizada: descNorm,
+            nome_final: ancora.descricao,
+            nome_final_normalizado: normalizeProductName(ancora.descricao),
+            product_id: ancora._id,
+            updatedAt: new Date(),
+            origem: 'auto',
+          },
+          $setOnInsert: { createdAt: new Date() },
+        },
+        { upsert: true }
+      );
+
+      // Atualiza compras antigas
+      await purchases.updateMany(
+        { 'itens.descricao': descOriginal, 'itens.descricao_original': { $exists: false } },
+        { $set: { 'itens.$[elem].descricao_original': descOriginal } },
+        { arrayFilters: [{ 'elem.descricao': descOriginal }] }
+      );
+
+      await purchases.updateMany(
+        { 'itens.descricao': descOriginal },
+        {
+          $set: {
+            'itens.$[elem].descricao': ancora.descricao,
+            'itens.$[elem].descricao_normalizada': normalizeProductName(ancora.descricao),
+            'itens.$[elem].product_id': ancora._id,
+          },
+        },
+        { arrayFilters: [{ 'elem.descricao': descOriginal }] }
+      );
+
+      // Bloqueia o produto antigo para não ser re‑mesclado
+      await products.updateOne(
+        { _id: item._id },
+        { $set: { block_auto_merge: true } }
+      );
+
+      console.log(`[cluster] Mesclado: "${descOriginal}" → "${ancora.descricao}"`);
+    }
+  }
+}
+
+// ─── UPSERT COM CLUSTERIZAÇÃO AUTOMÁTICA ────────────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
   // 1. Busca exata
@@ -103,39 +169,81 @@ const upsertProduct = async (db, item) => {
   if (existing) {
     await products.updateOne({ _id: existing._id }, { $set: { updatedAt: new Date() } });
     console.log(`[upsert] ✅ Exato: "${item.descricao}" → "${existing.nome_original}"`);
+
+    // 🔥 CRIA REGRA NO EXATO (se não existir)
+    const descNorm = normalizeProductName(item.descricao);
+    const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
+    if (!existingRule) {
+      await criarRegraEMesclar(db, item, existing, descNorm);
+      console.log(`[upsert] 📝 Regra criada via exato`);
+    }
+
+    // 🔥 TAMBÉM TENTA AGRUPAR COM OUTROS SIMILARES (clusterização)
+    // Busca todos os produtos (exceto bloqueados e o atual)
+    const allProducts = await products.find({
+      _id: { $ne: existing._id },
+      block_auto_merge: { $ne: true }
+    }).toArray();
+
+    if (allProducts.length > 0) {
+      // Prepara lista para clusterização
+      const contagem = await purchases.aggregate([
+        { $unwind: '$itens' },
+        { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
+      ]).toArray();
+      const mapContagem = new Map(contagem.map(c => [String(c._id), c.vezes]));
+
+      const lista = [
+        {
+          descricao: existing.nome_original,
+          descricao_normalizada: existing.nome_normalizado,
+          _id: existing._id,
+          vezes: mapContagem.get(String(existing._id)) || 0
+        },
+        ...allProducts.map(p => ({
+          descricao: p.nome_original,
+          descricao_normalizada: p.nome_normalizado,
+          _id: p._id,
+          vezes: mapContagem.get(String(p._id)) || 0
+        }))
+      ];
+
+      const grupo = sugerirGrupoDuplicado(lista, 0.5);
+      if (grupo && grupo.itens.length >= 2) {
+        console.log(`[upsert] 🔗 Grupo encontrado com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
+        await mesclarGrupo(db, grupo);
+        console.log(`[upsert] ✅ Grupo mesclado com sucesso.`);
+      } else {
+        console.log(`[upsert] ⚠️ Nenhum grupo adicional encontrado.`);
+      }
+    }
+
     return existing._id;
   }
 
-  // 2. Busca fuzzy com logs detalhados
+  // 2. Busca fuzzy (se não encontrar exato)
   const allProducts = await products.find({ block_auto_merge: { $ne: true } }).toArray();
   console.log(`[upsert] 🔍 Total de produtos disponíveis para fuzzy: ${allProducts.length}`);
 
   if (allProducts.length > 0) {
     const fuse = new Fuse(allProducts, {
       keys: ['nome_original', 'nome_normalizado'],
-      threshold: FUZZY_THRESHOLD,
+      threshold: 0.5,
       includeScore: true,
       ignoreLocation: true,
     });
 
-    // Busca usando a descrição original (mais rica)
     const resultados = fuse.search(item.descricao)
-      .filter(r => r.score <= FUZZY_THRESHOLD)
+      .filter(r => r.score <= 0.5)
       .sort((a, b) => a.score - b.score);
 
-    console.log(`[upsert] 🎯 Fuzzy: "${item.descricao}" → ${resultados.length} candidatos encontrados`);
+    console.log(`[upsert] 🎯 Fuzzy: "${item.descricao}" → ${resultados.length} candidatos`);
 
-    // Mostra os 5 melhores candidatos com seus scores
     if (resultados.length > 0) {
-      console.log(`[upsert] 📊 Top 5 candidatos:`);
       resultados.slice(0, 5).forEach((r, i) => {
         console.log(`  ${i+1}. "${r.item.nome_original}" (score: ${r.score.toFixed(4)})`);
       });
-    } else {
-      console.log(`[upsert] ⚠️ Nenhum candidato com score <= ${FUZZY_THRESHOLD}`);
-    }
 
-    if (resultados.length > 0) {
       const similar = resultados[0].item;
       console.log(`[upsert] 🏆 Melhor: "${similar.nome_original}" (score: ${resultados[0].score.toFixed(4)})`);
 
@@ -149,15 +257,52 @@ const upsertProduct = async (db, item) => {
       const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
       if (!existingRule) {
         await criarRegraEMesclar(db, item, similar, descNorm);
-        console.log(`[upsert] 📝 Regra criada via fuzzy: "${item.descricao}" → "${similar.nome_original}"`);
-      } else {
-        console.log(`[upsert] 📝 Regra já existia para "${item.descricao}"`);
+        console.log(`[upsert] 📝 Regra criada via fuzzy`);
       }
+
+      // 🔥 TAMBÉM TENTA AGRUPAR COM OUTROS SIMILARES (clusterização)
+      const allProducts2 = await products.find({
+        _id: { $ne: similar._id },
+        block_auto_merge: { $ne: true }
+      }).toArray();
+
+      if (allProducts2.length > 0) {
+        const contagem = await purchases.aggregate([
+          { $unwind: '$itens' },
+          { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
+        ]).toArray();
+        const mapContagem = new Map(contagem.map(c => [String(c._id), c.vezes]));
+
+        const lista = [
+          {
+            descricao: similar.nome_original,
+            descricao_normalizada: similar.nome_normalizado,
+            _id: similar._id,
+            vezes: mapContagem.get(String(similar._id)) || 0
+          },
+          ...allProducts2.map(p => ({
+            descricao: p.nome_original,
+            descricao_normalizada: p.nome_normalizado,
+            _id: p._id,
+            vezes: mapContagem.get(String(p._id)) || 0
+          }))
+        ];
+
+        const grupo = sugerirGrupoDuplicado(lista, 0.5);
+        if (grupo && grupo.itens.length >= 2) {
+          console.log(`[upsert] 🔗 Grupo encontrado com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
+          await mesclarGrupo(db, grupo);
+          console.log(`[upsert] ✅ Grupo mesclado com sucesso.`);
+        } else {
+          console.log(`[upsert] ⚠️ Nenhum grupo adicional encontrado.`);
+        }
+      }
+
       return similar._id;
     }
   }
 
-  // 3. Nenhum similar: cria novo
+  // 3. Nenhum similar: cria novo (sem regra)
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
