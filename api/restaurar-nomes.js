@@ -1,7 +1,7 @@
 import { getDb } from '../db.js';
 import { load } from 'cheerio';
 
-// ─── Utilitários (copiados do consulta-qrcode) ─────────────────────────────
+// ─── Utilitários ─────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
 
 const normalizeProductName = (text = '') => {
@@ -30,7 +30,7 @@ function calcPrecoUnitario(valor_total, quantidade) {
   return Math.round((vt / qt) * 100) / 100;
 }
 
-// ─── Parse do HTML (igual ao consulta-qrcode) ──────────────────────────────
+// ─── Parse do HTML ──────────────────────────────────────────────────────────
 const parseHtml = (html) => {
   const $ = load(html);
 
@@ -72,19 +72,30 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Senha incorreta.' });
   }
 
+  // ─── Parâmetros de lote ──────────────────────────────────────────────────
+  const limit = parseInt(req.query.limit) || 10; // padrão: 10
+  const skip = parseInt(req.query.skip) || 0;    // padrão: começa do início
+
   try {
     const db = await getDb();
     const purchases = db.collection('purchases');
 
-    // 🔥 Busca TODAS as notas (não apenas com null)
-    const cursor = purchases.find({});
+    // Busca todas as notas, com skip e limit
+    const cursor = purchases.find({})
+      .skip(skip)
+      .limit(limit);
 
-    let totalNotas = 0;
-    let totalItensRestaurados = 0;
+    const totalNotas = await purchases.countDocuments({}); // total geral
+
+    let notasProcessadas = 0;
+    let itensRestaurados = 0;
 
     for await (const purchase of cursor) {
       const url = purchase.url;
-      if (!url) continue;
+      if (!url) {
+        console.warn(`[restaurar] Nota sem URL, pulando.`);
+        continue;
+      }
 
       console.log(`[restaurar] Processando nota: ${url}`);
 
@@ -105,7 +116,7 @@ export default async function handler(req, res) {
           continue;
         }
 
-        // Mapeia itens originais por código (se disponível)
+        // Mapeia por código
         const mapPorCodigo = new Map();
         itensOriginais.forEach(item => {
           if (item.codigo) mapPorCodigo.set(item.codigo, item);
@@ -113,20 +124,15 @@ export default async function handler(req, res) {
 
         let modified = false;
         const itensAtualizados = purchase.itens.map((item, index) => {
-          // Tenta encontrar pelo código
           let original = null;
           if (item.codigo) {
             original = mapPorCodigo.get(item.codigo);
           }
-          // Se não achou por código, tenta pela posição (índice)
-          if (!original) {
-            if (index < itensOriginais.length) {
-              original = itensOriginais[index];
-            }
+          if (!original && index < itensOriginais.length) {
+            original = itensOriginais[index];
           }
 
           if (original && original.descricao) {
-            // Verifica se a descrição atual já está correta
             if (item.descricao !== original.descricao) {
               modified = true;
               const nomeOriginal = original.descricao;
@@ -135,7 +141,6 @@ export default async function handler(req, res) {
                 ...item,
                 descricao: nomeOriginal,
                 descricao_normalizada: nomeNormalizado,
-                // Opcional: atualizar outros campos se necessário
                 quantidade: original.quantidade || item.quantidade,
                 unidade: original.unidade || item.unidade,
                 valor_total: original.valor_total || item.valor_total,
@@ -151,25 +156,37 @@ export default async function handler(req, res) {
             { _id: purchase._id },
             { $set: { itens: itensAtualizados } }
           );
-          totalNotas++;
+          notasProcessadas++;
           const restaurados = itensAtualizados.filter((i, idx) => {
             const orig = itensOriginais[idx];
             return orig && i.descricao === orig.descricao;
           }).length;
-          totalItensRestaurados += restaurados;
+          itensRestaurados += restaurados;
           console.log(`[restaurar] Nota ${url} corrigida (${restaurados} itens)`);
         }
       } catch (err) {
         console.error(`[restaurar] Erro ao processar ${url}:`, err.message);
-        // Continua para a próxima nota
       }
     }
 
+    const proximoSkip = skip + limit;
+    const maisNotas = proximoSkip < totalNotas;
+
     return res.json({
       ok: true,
-      mensagem: 'Restauração concluída a partir das páginas originais.',
-      notas_afetadas: totalNotas,
-      itens_restaurados: totalItensRestaurados
+      mensagem: 'Restauração concluída para este lote.',
+      lote: {
+        processadas: notasProcessadas,
+        itens_restaurados: itensRestaurados,
+        skip_atual: skip,
+        limit: limit,
+        total_notas: totalNotas,
+        proximo_skip: maisNotas ? proximoSkip : null,
+        mais_notas: maisNotas,
+      },
+      instrucao: maisNotas
+        ? `Execute novamente com ?secret=SUA_SENHA&skip=${proximoSkip}&limit=${limit} para processar o próximo lote.`
+        : 'Todas as notas foram processadas.'
     });
   } catch (err) {
     console.error('[restaurar-nomes] Erro geral:', err.message);
