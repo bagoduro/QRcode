@@ -4,7 +4,7 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.7; // aumentado para 0.7
+const FUZZY_THRESHOLD = 0.9; // bem tolerante
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -18,7 +18,7 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
-// ─── FUNÇÃO DE CLUSTERIZAÇÃO (COPIADA DO FUZZYMERGE.JS) ───────────────────
+// ─── FUNÇÃO DE CLUSTERIZAÇÃO ───────────────────────────────────────────────
 function sugerirGrupoDuplicado(lista, threshold = 0.4) {
   if (!lista || lista.length < 2) return null;
 
@@ -57,7 +57,7 @@ function sugerirGrupoDuplicado(lista, threshold = 0.4) {
   return melhorGrupo;
 }
 
-// ─── UPSERT (ORIGINAL) ──────────────────────────────────────────────────────
+// ─── UPSERT ──────────────────────────────────────────────────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const nomeNormalizado = normalizeProductName(item.descricao);
@@ -125,91 +125,125 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── AUTO-MERGE POR CLUSTERIZAÇÃO (COM TRY/CATCH) ──────────────────────────
+// ─── AUTO-MERGE POR CLUSTERIZAÇÃO (COM LOGS DETALHADOS) ────────────────────
 async function autoMergeNovosItens(db, itensNovos) {
+  console.log('[autoMerge] Iniciando para', itensNovos.length, 'itens');
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
 
-  // Pré-calcular contagem de compras para todos os produtos
-  const pipeline = [
-    { $unwind: '$itens' },
-    { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
-  ];
-  const contagem = await purchases.aggregate(pipeline).toArray();
-  const mapContagem = new Map(contagem.map(c => [c._id.toString(), c.vezes]));
+  try {
+    // Pré-calcular contagem de compras
+    const pipeline = [
+      { $unwind: '$itens' },
+      { $group: { _id: '$itens.product_id', vezes: { $sum: 1 } } }
+    ];
+    const contagem = await purchases.aggregate(pipeline).toArray();
+    const mapContagem = new Map(contagem.map(c => [String(c._id), c.vezes]));
 
-  for (const item of itensNovos) {
-    try {
-      const descNorm = normalizeProductName(item.descricao);
-      const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
-      if (existingRule) continue;
+    for (const item of itensNovos) {
+      try {
+        const descNorm = normalizeProductName(item.descricao);
+        console.log(`[autoMerge] Processando item: "${item.descricao}" (norm: "${descNorm}")`);
 
-      const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
-      if (!produtoAtual) continue;
+        const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
+        if (existingRule) {
+          console.log(`[autoMerge] Item já possui regra, pulando.`);
+          continue;
+        }
 
-      const allProducts = await products.find({
-        _id: { $ne: produtoAtual._id },
-        block_auto_merge: { $ne: true }
-      }).toArray();
+        const produtoAtual = await products.findOne({ nome_normalizado: descNorm });
+        if (!produtoAtual) {
+          console.log(`[autoMerge] Produto atual não encontrado para "${descNorm}"`);
+          continue;
+        }
+        console.log(`[autoMerge] Produto atual ID: ${String(produtoAtual._id)}`);
 
-      if (allProducts.length === 0) continue;
+        const allProducts = await products.find({
+          _id: { $ne: produtoAtual._id },
+          block_auto_merge: { $ne: true }
+        }).toArray();
 
-      // 🔥 THRESHOLD AUMENTADO PARA 0.7
-      const fuse = new Fuse(allProducts, {
-        keys: ['nome_original', 'nome_normalizado'],
-        threshold: 0.7,
-        includeScore: true,
-        ignoreLocation: true,
-      });
-      const candidatos = fuse.search(item.descricao)
-        .filter(r => r.score <= 0.7)
-        .map(r => r.item);
+        if (allProducts.length === 0) {
+          console.log(`[autoMerge] Nenhum outro produto disponível.`);
+          continue;
+        }
+        console.log(`[autoMerge] Total de outros produtos: ${allProducts.length}`);
 
-      if (candidatos.length === 0) continue;
+        // Filtro fuzzy (threshold 0.9)
+        const fuse = new Fuse(allProducts, {
+          keys: ['nome_original', 'nome_normalizado'],
+          threshold: 0.9,
+          includeScore: true,
+          ignoreLocation: true,
+        });
+        const candidatos = fuse.search(item.descricao)
+          .filter(r => r.score <= 0.9)
+          .map(r => r.item);
 
-      const listaParaCluster = [
-        {
-          descricao: produtoAtual.nome_original,
-          descricao_normalizada: produtoAtual.nome_normalizado,
-          _id: produtoAtual._id,
-          vezes: mapContagem.get(produtoAtual._id.toString()) || 0
-        },
-        ...candidatos.map(p => ({
-          descricao: p.nome_original,
-          descricao_normalizada: p.nome_normalizado,
-          _id: p._id,
-          vezes: mapContagem.get(p._id.toString()) || 0
-        }))
-      ];
+        console.log(`[autoMerge] Candidatos encontrados: ${candidatos.length}`);
+        if (candidatos.length === 0) continue;
 
-      // 🔥 THRESHOLD AUMENTADO PARA 0.7
-      const grupo = sugerirGrupoDuplicado(listaParaCluster, 0.7);
-      if (!grupo) continue;
+        // Montar lista para clusterização
+        const listaParaCluster = [
+          {
+            descricao: produtoAtual.nome_original,
+            descricao_normalizada: produtoAtual.nome_normalizado,
+            _id: produtoAtual._id,
+            vezes: mapContagem.get(String(produtoAtual._id)) || 0
+          },
+          ...candidatos.map(p => ({
+            descricao: p.nome_original,
+            descricao_normalizada: p.nome_normalizado,
+            _id: p._id,
+            vezes: mapContagem.get(String(p._id)) || 0
+          }))
+        ];
 
-      const itemNoGrupo = grupo.itens.some(i => i._id.toString() === produtoAtual._id.toString());
-      if (!itemNoGrupo) continue;
+        const grupo = sugerirGrupoDuplicado(listaParaCluster, 0.9);
+        if (!grupo) {
+          console.log(`[autoMerge] Nenhum grupo formado para "${item.descricao}"`);
+          continue;
+        }
+        console.log(`[autoMerge] Grupo formado com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
 
-      const ancora = grupo.ancora;
-      if (ancora._id.toString() === produtoAtual._id.toString()) continue;
+        const itemNoGrupo = grupo.itens.some(i => String(i._id) === String(produtoAtual._id));
+        if (!itemNoGrupo) {
+          console.log(`[autoMerge] Produto atual não está no grupo. Pulando.`);
+          continue;
+        }
 
-      for (const itemDoGrupo of grupo.itens) {
-        if (itemDoGrupo._id.toString() === ancora._id.toString()) continue;
-        const descOriginal = itemDoGrupo.descricao;
-        const descNormItem = normalizeProductName(descOriginal);
-        await criarRegraEMesclar(db, { descricao: descOriginal }, ancora, descNormItem);
-        await products.updateOne(
-          { _id: itemDoGrupo._id },
-          { $set: { block_auto_merge: true } }
-        );
+        const ancora = grupo.ancora;
+        if (String(ancora._id) === String(produtoAtual._id)) {
+          console.log(`[autoMerge] Âncora já é o produto atual. Nada a fazer.`);
+          continue;
+        }
+
+        let mesclados = 0;
+        for (const itemDoGrupo of grupo.itens) {
+          if (String(itemDoGrupo._id) === String(ancora._id)) continue;
+          const descOriginal = itemDoGrupo.descricao;
+          const descNormItem = normalizeProductName(descOriginal);
+          console.log(`[autoMerge] Mesclando "${descOriginal}" → "${ancora.descricao}"`);
+          await criarRegraEMesclar(db, { descricao: descOriginal }, ancora, descNormItem);
+          await products.updateOne(
+            { _id: itemDoGrupo._id },
+            { $set: { block_auto_merge: true } }
+          );
+          mesclados++;
+        }
+        console.log(`[autoMerge] Mesclados ${mesclados} itens para "${ancora.descricao}"`);
+      } catch (err) {
+        console.error(`[autoMerge] Erro ao processar item "${item.descricao}":`, err.message);
       }
-    } catch (err) {
-      console.error('[autoMergeNovosItens] Erro ao processar item:', item.descricao, err.message);
     }
+  } catch (err) {
+    console.error('[autoMerge] Erro geral:', err.message);
+    throw err;
   }
 }
 
-// ─── SALVAR COMPRA (COM AUTO-MERGE PÓS-INSERÇÃO E LOGS) ──────────────────
+// ─── SALVAR COMPRA (COM LOGS) ──────────────────────────────────────────────
 const savePurchase = async (url, resultado) => {
   try {
     console.log('[savePurchase] Iniciando salvamento...', { url });
@@ -225,14 +259,11 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
-    // Guarda os itens originais para o auto-merge posterior
     const itensOriginais = resultado.itens.map(item => ({ ...item }));
 
-    // Carrega regras existentes
     const rules = await mergeRules.find({}).toArray();
     const rulesMap = new Map(rules.map(r => [r.descricao_original_normalizada, r]));
 
-    // Produtos existentes para fuzzy-merge
     const produtosExistentes = await products.find({ block_auto_merge: { $ne: true } }).toArray();
     console.log('[savePurchase] TOTAL PRODUTOS CARREGADOS:', produtosExistentes.length);
 
@@ -241,7 +272,6 @@ const savePurchase = async (url, resultado) => {
       produtosExistentes.filter(p => p.codigo).map(p => [p.codigo, p])
     );
 
-    // 🔥 THRESHOLD 0.7 (já está usando FUZZY_THRESHOLD)
     const fuse = new Fuse(produtosExistentes, {
       keys: ['nome_original', 'nome_normalizado'],
       includeScore: true,
@@ -268,15 +298,15 @@ const savePurchase = async (url, resultado) => {
         }
 
         const codigoJaConhecido = item.codigo && produtosPorCodigo.has(item.codigo);
-        if (!codigoJaConhecido && !produtosPorNomeNorm.has(nomeNorm)) {
-          // 🔥 LOG: termo pesquisado
+        const nomeExiste = produtosPorNomeNorm.has(nomeNorm);
+
+        if (!codigoJaConhecido && !nomeExiste) {
           console.log('[savePurchase] PROCURANDO:', nomeNorm);
 
           const achados = fuse.search(nomeNorm)
             .filter(r => r.score <= FUZZY_THRESHOLD)
             .sort((a, b) => a.score - b.score);
 
-          // 🔥 LOG: primeiros 10 resultados
           console.log(
             '[savePurchase] RESULTADOS (top 10):',
             achados.slice(0, 10).map(a => ({
@@ -315,6 +345,8 @@ const savePurchase = async (url, resultado) => {
           } else {
             console.log('[savePurchase] Nenhum resultado para:', nomeNorm);
           }
+        } else {
+          console.log(`[savePurchase] Item já existe (nome ou código): "${item.descricao}"`);
         }
 
         const productId = await upsertProduct(db, item);
@@ -339,7 +371,7 @@ const savePurchase = async (url, resultado) => {
     await purchases.insertOne(purchase);
     console.log('[savePurchase] Documento inserido com sucesso.');
 
-    // ─── AUTO-MERGE POR CLUSTERIZAÇÃO (SEGURO) ─────────────────────────────
+    // ─── AUTO-MERGE POR CLUSTERIZAÇÃO ──────────────────────────────────────
     try {
       await autoMergeNovosItens(db, itensOriginais);
     } catch (err) {
@@ -354,7 +386,7 @@ const savePurchase = async (url, resultado) => {
   }
 };
 
-// ─── FUNÇÕES DE PARSING (MANTIDAS IGUAIS) ──────────────────────────────────
+// ─── FUNÇÕES DE PARSING (SEM ALTERAÇÕES) ────────────────────────────────────
 function parseValorNum(valor) {
   if (!valor) return null;
   const limpo = String(valor)
@@ -455,7 +487,7 @@ const parseHtml = (html) => {
   };
 };
 
-// ─── HANDLER VERCEL ─────────────────────────────────────────────────────────
+// ─── HANDLER ──────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
