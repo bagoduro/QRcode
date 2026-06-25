@@ -45,6 +45,75 @@
       padding: 1rem 0 1.5rem;
     }
 
+    header.app-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .user-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    /* Auth user block (hidden by default) moved from inline styles */
+    #auth-user {
+      display: none;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-chip span {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .btn-icon {
+      border: 0.5px solid var(--border-strong);
+      background: var(--bg-primary);
+      color: var(--text-secondary);
+      border-radius: var(--radius-md);
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 15px;
+      transition: background 0.15s;
+    }
+
+    .btn-icon:hover { background: var(--bg-secondary); color: var(--danger); }
+
+    .btn-auth {
+      display: inline-flex;
+      align-items: center;
+      height: 32px;
+      padding: 0 12px;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background 0.15s;
+      margin-left: 6px;
+    }
+
+    .btn-auth:hover { background: var(--bg-secondary); }
+    .btn-auth.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-auth.primary:hover { background: #0c5a45; }
+
     header h1 {
       font-size: 22px;
       font-weight: 500;
@@ -289,6 +358,11 @@
 
     .scan-success.show { display: flex; }
 
+    #qr-video {
+      width: 100%;
+      display: block;
+    }
+
     .result-row {
       display: flex;
       justify-content: space-between;
@@ -433,6 +507,27 @@
     .nota-itens .result-row .info p:first-child { font-size: 13px; }
     .nota-itens .result-row .value { font-size: 13px; font-weight: 400; }
 
+    .btn-excluir-nota {
+      margin-top: 12px;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 0.5px solid var(--danger);
+      background: transparent;
+      color: var(--danger);
+      border-radius: var(--radius-md);
+      height: 36px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-excluir-nota:hover { background: var(--danger-bg); }
+    .btn-excluir-nota:active { transform: scale(0.98); }
+
     .loading {
       display: flex;
       align-items: center;
@@ -485,13 +580,99 @@
       nav.tabs button span { display: none; }
       .summary-grid { grid-template-columns: 1fr 1fr; }
     }
+
+    /* Modal de confirmação */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-box {
+      background: var(--bg-primary);
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      max-width: 320px;
+      width: calc(100% - 2rem);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    }
+    .modal-box h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 8px;
+    }
+    .modal-box p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 1.25rem;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .modal-actions button {
+      border-radius: var(--radius-md);
+      height: 36px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 0.5px solid var(--border-strong);
+    }
+    .modal-btn-cancel {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+    }
+    .modal-btn-cancel:hover { background: var(--bg-secondary); }
+    .modal-btn-confirm {
+      background: var(--danger);
+      color: #fff;
+      border-color: var(--danger) !important;
+    }
+    .modal-btn-confirm:hover { opacity: 0.88; }
   </style>
 </head>
 <body>
+  <div class="modal-overlay" id="modal-excluir">
+    <div class="modal-box">
+      <h3>Excluir nota</h3>
+      <p>Tem certeza que deseja excluir esta nota? Essa ação não pode ser desfeita.</p>
+      <div class="modal-actions">
+        <button class="modal-btn-cancel" id="modal-cancelar">Cancelar</button>
+        <button class="modal-btn-confirm" id="modal-confirmar">Excluir</button>
+      </div>
+    </div>
+  </div>
   <div class="app">
-    <header>
-      <h1>Histórico de compras</h1>
-      <p>Leia notas fiscais por QR code e compare preços entre estabelecimentos</p>
+    <header class="app-header">
+      <div>
+        <h1>Histórico de compras</h1>
+        <p>Leia notas fiscais por QR code e compare preços entre estabelecimentos</p>
+      </div>
+      <div class="user-chip">
+        <!-- Exibido quando NAO esta logado -->
+        <div id="auth-guest">
+          <a href="/login.html" class="btn-auth">Entrar</a>
+          <a href="/cadastro.html" class="btn-auth primary">Cadastrar</a>
+        </div>
+        <!-- Exibido quando esta logado -->
+        <div id="auth-user">
+          <span id="user-name"></span>
+          <button id="btn-logout" class="btn-icon" title="Sair" aria-label="Sair">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </header>
 
     <nav class="tabs">
@@ -513,7 +694,7 @@
             <i class="ti ti-player-play"></i> Iniciar câmera
           </button>
           <div class="scanner-wrapper" id="scanner-wrapper">
-            <video id="qr-video" style="width:100%; display:block;" autoplay muted playsinline></video>
+            <video id="qr-video" autoplay muted></video>
             <div class="scanner-overlay">
               <div class="scanner-box">
                 <div class="scan-line"></div>
@@ -551,7 +732,7 @@
           <div class="input-row">
             <input type="text" id="input-produto" placeholder="ex: arroz, sabonete, papel higiênico" />
             <button class="btn primary" id="btn-buscar-produto">
-              <i class="ti ti-search"></i>
+              <i class="ti ti-search" aria-hidden="true"></i> Buscar
             </button>
           </div>
           <p class="helper">Busca por aproximação no nome do item registrado nas notas.</p>
@@ -575,7 +756,7 @@
         <button class="btn primary full" id="btn-carregar-recorrentes">
           <i class="ti ti-refresh"></i> Carregar
         </button>
-        <div id="recorrentes-result" style="margin-top: 1rem;"></div>
+        <div id="recorrentes-result"></div>
       </div>
     </section>
 
@@ -586,14 +767,32 @@
         <button class="btn full" id="btn-carregar-historico">
           <i class="ti ti-refresh"></i> Atualizar lista
         </button>
-        <div id="historico-result" style="margin-top: 1rem;"></div>
+        <div id="historico-result"></div>
       </div>
     </section>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <script src="/auth-client.js"></script>
   <script>
-    const API_BASE = '/api';
+    // ---------- Autenticacao opcional: adapta o cabecalho ao estado do usuario ----------
+    const usuarioLogado = getUsuario();
+    const authGuest = document.getElementById('auth-guest');
+    const authUser  = document.getElementById('auth-user');
+    const userNameEl = document.getElementById('user-name');
+
+    if (usuarioLogado) {
+      authGuest.style.display = 'none';
+      authUser.style.display  = 'flex';
+      userNameEl.textContent  = usuarioLogado.nome;
+      userNameEl.title        = usuarioLogado.email;
+      document.getElementById('btn-logout').addEventListener('click', () => {
+        limparSessao();
+        location.reload();
+      });
+    }
+
+    // API_BASE já está declarado em auth-client.js (carregado acima).
 
     // ---------- Navegação entre abas ----------
     const tabButtons = document.querySelectorAll('.tab-btn');
@@ -648,6 +847,23 @@
         throw new Error(`Resposta inválida do servidor (status ${res.status}). Verifique a rota ${url.pathname}.`);
       }
       if (!res.ok) throw new Error(data.error || 'Erro na requisição');
+      return data;
+    }
+
+    async function apiDelete(path, params = {}) {
+      const url = new URL(API_BASE + path, window.location.origin);
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+      });
+      const res = await fetch(url, { method: 'DELETE' });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Resposta inválida do servidor (status ${res.status}).`);
+      }
+      if (!res.ok) throw new Error(data.error || 'Erro ao excluir');
       return data;
     }
 
@@ -927,6 +1143,53 @@
       document.getElementById('nota-' + idx).classList.toggle('expanded');
     }
 
+    function excluirNota(urlEncoded, idx) {
+      const url = decodeURIComponent(urlEncoded);
+      if (!url) return;
+
+      const overlay = document.getElementById('modal-excluir');
+      const btnConfirmar = document.getElementById('modal-confirmar');
+      const btnCancelar = document.getElementById('modal-cancelar');
+
+      overlay.classList.add('active');
+
+      function fechar() {
+        overlay.classList.remove('active');
+        btnConfirmar.removeEventListener('click', onConfirm);
+        btnCancelar.removeEventListener('click', fechar);
+        overlay.removeEventListener('click', onOverlay);
+      }
+
+      async function onConfirm() {
+        fechar();
+        try {
+          await apiDelete('/historico-compras', { url });
+          const card = document.getElementById('nota-' + idx);
+          if (card) {
+            card.style.transition = 'opacity 0.3s';
+            card.style.opacity = '0';
+            setTimeout(() => { card.remove(); }, 300);
+          }
+          const helper = historicoResult.querySelector('.helper');
+          if (helper) {
+            const remaining = historicoResult.querySelectorAll('.item-card').length - 1;
+            helper.textContent = remaining + ' nota(s) registrada(s).';
+          }
+        } catch (err) {
+          // mostra erro inline no topo do resultado
+          const errDiv = document.createElement('div');
+          errDiv.innerHTML = alertHtml(err.message);
+          historicoResult.prepend(errDiv);
+        }
+      }
+
+      function onOverlay(e) { if (e.target === overlay) fechar(); }
+
+      btnConfirmar.addEventListener('click', onConfirm);
+      btnCancelar.addEventListener('click', fechar);
+      overlay.addEventListener('click', onOverlay);
+    }
+
     async function carregarHistorico() {
       historicoResult.innerHTML = loadingHtml('Carregando suas compras...');
       try {
@@ -948,6 +1211,7 @@
             </div>
           `).join('');
 
+          const urlEncoded = encodeURIComponent(c.url || '');
           return `
             <div class="item-card" id="nota-${idx}" onclick="toggleNota(${idx})">
               <div class="top-row">
@@ -955,7 +1219,12 @@
                 <span>${formatValor(c.valor_pago)} <i class="ti ti-chevron-down chevron" aria-hidden="true"></i></span>
               </div>
               <div class="meta">${formatData(c.data_compra)} • ${c.quantidade_itens || (c.itens || []).length} ite${(c.itens||[]).length === 1 ? 'm' : 'ns'}</div>
-              <div class="nota-itens">${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}</div>
+              <div class="nota-itens">
+                ${itensHtml || emptyHtml('ti-package-off', 'Nenhum item registrado')}
+                <button class="btn-excluir-nota" onclick="event.stopPropagation(); excluirNota('${urlEncoded}', ${idx})">
+                  <i class="ti ti-trash" aria-hidden="true"></i> Excluir esta nota
+                </button>
+              </div>
             </div>
           `;
         }).join('');

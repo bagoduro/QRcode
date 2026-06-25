@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entrar — Leitor QR</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tabler-icons/2.47.0/iconfont/tabler-icons.min.css" />
+  <link rel="stylesheet" href="/auth.css" />
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card">
+      <a href="/index.html" class="btn-back">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Voltar
+      </a>
+      <div class="auth-header">
+        <div class="auth-icon"><i class="ti ti-qrcode" aria-hidden="true"></i></div>
+        <h1>Entrar</h1>
+        <p>Acesse sua conta para ver seu histórico de compras</p>
+      </div>
+
+      <div id="form-alert"></div>
+
+      <form id="form-login" novalidate>
+        <div class="field">
+          <label for="input-email">E-mail</label>
+          <input
+            type="email"
+            id="input-email"
+            placeholder="voce@exemplo.com"
+            autocomplete="email"
+            required
+          />
+        </div>
+
+        <div class="field">
+          <label for="input-senha">Senha</label>
+          <div class="password-row">
+            <input
+              type="password"
+              id="input-senha"
+              placeholder="Sua senha"
+              autocomplete="current-password"
+              required
+            />
+            <button
+              type="button"
+              class="toggle-password"
+              id="btn-toggle-senha"
+              aria-label="Mostrar senha"
+            >
+              <i class="ti ti-eye" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn primary full" id="btn-entrar">
+          <i class="ti ti-login" aria-hidden="true"></i> Entrar
+        </button>
+      </form>
+
+      <p class="auth-switch">Não tem conta? <a href="/cadastro.html">Criar conta</a></p>
+    </div>
+  </div>
+
+  <script src="/auth-client.js"></script>
+  <script>
+    // Se já existe uma sessão salva, não faz sentido mostrar o login de novo.
+    if (getToken()) {
+      window.location.href = '/index.html';
+    }
+
+    setupPasswordToggle('btn-toggle-senha', 'input-senha');
+
+    const form = document.getElementById('form-login');
+    const alertBox = document.getElementById('form-alert');
+    const btnEntrar = document.getElementById('btn-entrar');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      alertBox.innerHTML = '';
+
+      const email = document.getElementById('input-email').value.trim();
+      const senha = document.getElementById('input-senha').value;
+
+      if (!email || !senha) {
+        alertBox.innerHTML = alertHtml('Preencha e-mail e senha.');
+        return;
+      }
+
+      btnEntrar.disabled = true;
+      btnEntrar.innerHTML = '<div class="spinner"></div> Entrando...';
+
+      try {
+        const data = await apiPost('/login', { email, senha });
+        salvarSessao(data.token, data.usuario);
+        window.location.href = '/index.html';
+      } catch (err) {
+        alertBox.innerHTML = alertHtml(err.message);
+        btnEntrar.disabled = false;
+        btnEntrar.innerHTML = '<i class="ti ti-login" aria-hidden="true"></i> Entrar';
+      }
+    });
+  </script>
+</body>
+</html>

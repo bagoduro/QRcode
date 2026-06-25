@@ -2,6 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import { load } from 'cheerio';
 import { getDb } from './db.js';
+import {
+  hashPassword,
+  comparePassword,
+  gerarToken,
+  sanitizeUsuario,
+  validarCadastro,
+  garantirIndiceUsuarios,
+} from './auth.js';
 
 const app = express();
 const port = process.env.PORT || 3333;
@@ -220,6 +228,85 @@ app.get('/health', async (req, res) => {
   }
 });
 
+app.post('/cadastro', async (req, res) => {
+  const { nome, email, senha } = req.body || {};
+  console.log('[POST /cadastro] Requisição recebida:', { email });
+
+  const erros = validarCadastro({ nome, email, senha });
+  if (erros.length > 0) {
+    return res.status(400).json({ error: erros.join(' ') });
+  }
+
+  const emailNormalizado = email.trim().toLowerCase();
+
+  try {
+    const db = await getDb();
+    await garantirIndiceUsuarios(db);
+    const users = db.collection('users');
+
+    const existente = await users.findOne({ email: emailNormalizado });
+    if (existente) {
+      return res.status(409).json({ error: 'Já existe uma conta cadastrada com este e-mail.' });
+    }
+
+    const senhaHash = await hashPassword(senha);
+    const novoUsuario = {
+      nome: nome.trim(),
+      email: emailNormalizado,
+      senhaHash,
+      createdAt: new Date(),
+    };
+
+    const resultado = await users.insertOne(novoUsuario);
+    novoUsuario._id = resultado.insertedId;
+
+    const token = gerarToken(novoUsuario);
+    console.log('[POST /cadastro] Usuário criado com sucesso:', novoUsuario._id.toString());
+
+    return res.status(201).json({ token, usuario: sanitizeUsuario(novoUsuario) });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: 'Já existe uma conta cadastrada com este e-mail.' });
+    }
+    console.error('[POST /cadastro] Erro:', error.message, error.stack);
+    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+  }
+});
+
+app.post('/login', async (req, res) => {
+  const { email, senha } = req.body || {};
+  console.log('[POST /login] Requisição recebida:', { email });
+
+  if (!email || !senha) {
+    return res.status(400).json({ error: 'Informe e-mail e senha.' });
+  }
+
+  const emailNormalizado = email.trim().toLowerCase();
+
+  try {
+    const db = await getDb();
+    const users = db.collection('users');
+    const usuario = await users.findOne({ email: emailNormalizado });
+
+    if (!usuario) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+    }
+
+    const senhaCorreta = await comparePassword(senha, usuario.senhaHash);
+    if (!senhaCorreta) {
+      return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+    }
+
+    const token = gerarToken(usuario);
+    console.log('[POST /login] Login bem-sucedido:', usuario._id.toString());
+
+    return res.json({ token, usuario: sanitizeUsuario(usuario) });
+  } catch (error) {
+    console.error('[POST /login] Erro:', error.message, error.stack);
+    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
+  }
+});
+
 const parseValor = (valor) => {
   if (!valor) return Infinity;
   const limpo = String(valor)
@@ -395,6 +482,30 @@ app.get('/historico-compras', async (req, res) => {
     return res.json({ total: compras.length, compras });
   } catch (err) {
     console.error('[GET /historico-compras] Erro:', err.message, err.stack);
+    return res.status(500).json({ error: 'Erro interno', details: err.message });
+  }
+});
+
+app.delete('/historico-compras', async (req, res) => {
+  const { url } = req.query;
+
+  if (!url) {
+    return res.status(400).json({ error: 'Parâmetro "url" é obrigatório.' });
+  }
+
+  try {
+    const db = await getDb();
+    const purchases = db.collection('purchases');
+
+    const result = await purchases.deleteOne({ url });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Nota não encontrada.' });
+    }
+
+    return res.json({ success: true, message: 'Nota excluída com sucesso.' });
+  } catch (err) {
+    console.error('[DELETE /historico-compras] Erro:', err.message, err.stack);
     return res.status(500).json({ error: 'Erro interno', details: err.message });
   }
 });
