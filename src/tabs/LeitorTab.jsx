@@ -73,7 +73,7 @@ export default function LeitorTab() {
         </div>
 
         <div className="result-area">
-          {loading && <Loading text="'Nota registrada! Os itens estão sendo consolidados..." />}
+          {loading && <Loading text="Nota registrada! Os itens estão sendo consolidados..." />}
           {!loading && error && <Alert tone="danger">{error}</Alert>}
           {!loading && infoMsg && <Alert tone="info">{infoMsg}</Alert>}
           {!loading && nota && <NotaResult nota={nota} />}
