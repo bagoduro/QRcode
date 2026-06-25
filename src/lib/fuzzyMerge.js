@@ -1,17 +1,8 @@
 import Fuse from 'fuse.js';
 
 const DEFAULT_THRESHOLD = 0.4;
+const MAX_GROUP_SIZE = 5;
 
-/**
- * Procura, dentro de uma lista de sugestões de produto (mesmo termo buscado),
- * o maior grupo de descrições que são variações/typos do mesmo produto.
- *
- * Usa o item mais comprado como "âncora" (presumivelmente o nome mais
- * confiável) e busca, via Fuse.js, quais outras descrições são similares
- * o suficiente pra serem o mesmo produto.
- *
- * Retorna null se não achar nenhum grupo com 2+ itens.
- */
 export function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
 
@@ -34,7 +25,8 @@ export function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
       .filter((r) => r.score <= threshold)
       .map((r) => r.item);
 
-    if (achados.length >= 2) {
+    // 🔥 LIMITE: só forma grupo se tiver entre 2 e MAX_GROUP_SIZE itens
+    if (achados.length >= 2 && achados.length <= MAX_GROUP_SIZE) {
       const grupo = { ancora, itens: achados };
       if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
         melhorGrupo = grupo;

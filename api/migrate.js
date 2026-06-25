@@ -2,6 +2,7 @@ import { getDb } from '../db.js';
 import Fuse from 'fuse.js';
 
 const DEFAULT_THRESHOLD = 0.4;
+const MAX_GROUP_SIZE = 5; // limite de itens por grupo
 
 function normalizeProductName(text = '') {
   return text
@@ -12,10 +13,6 @@ function normalizeProductName(text = '') {
     .trim();
 }
 
-/**
- * Procura, dentro de uma lista de sugestões de produto,
- * o maior grupo de descrições que são variações/typos do mesmo produto.
- */
 function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
 
@@ -38,7 +35,8 @@ function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
       .filter((r) => r.score <= threshold)
       .map((r) => r.item);
 
-    if (achados.length >= 2) {
+    // 🔥 LIMITE: só forma grupo se tiver entre 2 e MAX_GROUP_SIZE itens
+    if (achados.length >= 2 && achados.length <= MAX_GROUP_SIZE) {
       const grupo = { ancora, itens: achados };
       if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
         melhorGrupo = grupo;
@@ -57,15 +55,13 @@ function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Proteção por senha
   const secret = process.env.MIGRATE_SECRET;
-  
   if (!secret) {
-    return res.status(500).json({ error: 'Configuração ausente: A variável de ambiente MIGRATE_SECRET não foi definida no servidor.' });
+    return res.status(500).json({ error: 'Configuração ausente: MIGRATE_SECRET não definida.' });
   }
 
   if (req.query.secret !== secret) {
-    return res.status(401).json({ error: 'Senha incorreta. Informe ?secret=SUA_SENHA corretamente.' });
+    return res.status(401).json({ error: 'Senha incorreta.' });
   }
 
   if (req.method !== 'POST') {
@@ -74,11 +70,10 @@ export default async function handler(req, res) {
 
   try {
     const db = await getDb();
-    const purchases  = db.collection('purchases');
-    const products   = db.collection('products');
+    const purchases = db.collection('purchases');
+    const products = db.collection('products');
     const mergeRules = db.collection('merge_rules');
 
-    // 1. Agrupar todos os produtos distintos do banco de compras para encontrar duplicados
     const pipeline = [
       { $unwind: '$itens' },
       {
@@ -101,17 +96,15 @@ export default async function handler(req, res) {
     let totalRegrasCriadas = 0;
     let totalNotasAtualizadas = 0;
 
-    // 2. Rodar Fuse.js repetidamente até não encontrar mais grupos óbvios
     let atual = listaParaFuse;
     while (true) {
-      const grupo = sugerirGrupoDuplicado(atual);
+      const grupo = sugerirGrupoDuplicado(atual, DEFAULT_THRESHOLD);
       if (!grupo) break;
 
       const nomeFinal = grupo.ancora.descricao;
       const nomeFinalNorm = normalizeProductName(nomeFinal);
       const descricoesOriginais = grupo.itens.map(i => i.descricao);
 
-      // Criar/Atualizar o produto canônico
       await products.updateOne(
         { nome_normalizado: nomeFinalNorm },
         {
@@ -126,13 +119,11 @@ export default async function handler(req, res) {
       );
       const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
 
-      // Atualizar compras e criar regras
       for (const descOriginal of descricoesOriginais) {
         if (normalizeProductName(descOriginal) === nomeFinalNorm) continue;
 
         const descOrigNorm = normalizeProductName(descOriginal);
 
-        // Salvar regra de auto-merge
         await mergeRules.updateOne(
           { descricao_original_normalizada: descOrigNorm },
           {
@@ -150,7 +141,6 @@ export default async function handler(req, res) {
         );
         totalRegrasCriadas++;
 
-        // Atualizar notas que contenham esse item (preservando o original se necessário)
         await purchases.updateMany(
           { 'itens.descricao': descOriginal, 'itens.descricao_original': { $exists: false } },
           { $set: { 'itens.$[elem].descricao_original': descOriginal } },
@@ -172,8 +162,6 @@ export default async function handler(req, res) {
       }
 
       gruposMesclados++;
-      
-      // Remover os itens processados da lista para a próxima iteração
       const descricoesNoGrupo = new Set(descricoesOriginais);
       atual = atual.filter(i => !descricoesNoGrupo.has(i.descricao));
     }

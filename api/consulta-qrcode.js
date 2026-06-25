@@ -4,9 +4,9 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.4; // mesmo do frontend – seguro
-const CLUSTER_THRESHOLD = 0.35; // mais rigoroso para clusterização
-const MAX_GROUP_SIZE = 5; // impede grupos gigantes
+const FUZZY_THRESHOLD = 0.4; // seguro
+const CLUSTER_THRESHOLD = 0.35; // rigoroso
+const MAX_GROUP_SIZE = 5; // limite de itens por grupo
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -21,7 +21,7 @@ const normalizeProductName = (text = '') => {
 };
 
 // ─── FUNÇÃO DE CLUSTERIZAÇÃO COM LIMITE DE TAMANHO ────────────────────────
-function sugerirGrupoDuplicado(lista, threshold = 0.35) {
+function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
   if (!lista || lista.length < 2) return null;
 
   const restante = [...lista];
@@ -128,7 +128,7 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── AUTO-MERGE SEGURO ──────────────────────────────────────────────────────
+// ─── AUTO-MERGE SEGURO (COM VERIFICAÇÃO DE PALAVRAS‑CHAVE) ──────────────────
 async function autoMergeNovosItens(db, itensNovos) {
   console.log('[autoMerge] Iniciando para', itensNovos.length, 'itens');
   const products = db.collection('products');
@@ -208,6 +208,17 @@ async function autoMergeNovosItens(db, itensNovos) {
         }
 
         console.log(`[autoMerge] Grupo com ${grupo.itens.length} itens. Âncora: "${grupo.ancora.descricao}"`);
+
+        // ─── VERIFICAÇÃO DE PALAVRAS‑CHAVE (segurança extra) ──────────────
+        const palavrasAncora = grupo.ancora.descricao.toLowerCase().split(/\s+/);
+        const todosCompartilham = grupo.itens.every(i => {
+          const palavrasItem = i.descricao.toLowerCase().split(/\s+/);
+          return palavrasAncora.some(p => palavrasItem.includes(p));
+        });
+        if (!todosCompartilham) {
+          console.log(`[autoMerge] Grupo rejeitado: itens não compartilham palavras‑chave.`);
+          continue;
+        }
 
         const itemNoGrupo = grupo.itens.some(i => String(i._id) === String(produtoAtual._id));
         if (!itemNoGrupo) {
