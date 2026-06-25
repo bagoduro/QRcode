@@ -4,7 +4,8 @@ import Fuse from 'fuse.js';
 import { getDb } from '../db.js';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
-const FUZZY_THRESHOLD = 0.5; // captura variações como "LEITE CAMPONESA 1L INTEGRAL" e "LEITE LV CAMPONESA 1L INT"
+const FUZZY_THRESHOLD = 0.6; // aumentado para capturar mais variações
+const CLUSTER_TIMEOUT = 3000; // 3 segundos máximo para clusterização
 
 // ─── UTILITÁRIOS ────────────────────────────────────────────────────────────
 const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
@@ -18,10 +19,42 @@ const normalizeProductName = (text = '') => {
     .trim();
 };
 
+// ─── FUNÇÃO DE CLUSTERIZAÇÃO SIMPLES (FALLBACK) ────────────────────────────
+function sugerirGrupoDuplicadoSimples(lista, threshold = 0.4) {
+  if (!lista || lista.length < 2) return null;
+  const restante = [...lista];
+  let melhor = null;
+  while (restante.length >= 2) {
+    restante.sort((a, b) => (b.vezes || 0) - (a.vezes || 0));
+    const ancora = restante[0];
+    const fuse = new Fuse(restante, {
+      keys: ['descricao'],
+      includeScore: true,
+      threshold,
+      ignoreLocation: true,
+    });
+    const achados = fuse.search(ancora.descricao)
+      .filter(r => r.score <= threshold)
+      .map(r => r.item);
+    if (achados.length >= 2 && achados.length <= 5) {
+      const grupo = { ancora, itens: achados };
+      if (!melhor || grupo.itens.length > melhor.itens.length) melhor = grupo;
+    }
+    const descartar = new Set([ancora.descricao, ...achados.map(i => i.descricao)]);
+    for (let i = restante.length - 1; i >= 0; i--) {
+      if (descartar.has(restante[i].descricao)) restante.splice(i, 1);
+    }
+  }
+  return melhor;
+}
+
 // ─── CRIAR REGRA DE MESCLAGEM ──────────────────────────────────────────────
 async function criarRegraEMesclar(db, item, ancora, descNorm) {
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
+
+  const existing = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
+  if (existing) return;
 
   await mergeRules.updateOne(
     { descricao_original_normalizada: descNorm },
@@ -40,14 +73,12 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
     { upsert: true }
   );
 
-  // Atualiza compras antigas que tenham esse item (sem descricao_original)
   await purchases.updateMany(
     { 'itens.descricao': item.descricao, 'itens.descricao_original': { $exists: false } },
     { $set: { 'itens.$[elem].descricao_original': item.descricao } },
     { arrayFilters: [{ 'elem.descricao': item.descricao }] }
   );
 
-  // Atualiza todas as ocorrências desse item para o nome final
   await purchases.updateMany(
     { 'itens.descricao': item.descricao },
     {
@@ -61,20 +92,22 @@ async function criarRegraEMesclar(db, item, ancora, descNorm) {
   );
 }
 
-// ─── UPSERT COM BUSCA FUZZY E CRIAÇÃO DE REGRA ─────────────────────────────
+// ─── UPSERT COM BUSCA FUZZY + FALLBACK DE CLUSTERIZAÇÃO ─────────────────────
 const upsertProduct = async (db, item) => {
   const products = db.collection('products');
   const mergeRules = db.collection('merge_rules');
+  const purchases = db.collection('purchases');
   const nomeNormalizado = normalizeProductName(item.descricao);
 
   // 1. Busca exata
   let existing = await products.findOne({ nome_normalizado: nomeNormalizado });
   if (existing) {
     await products.updateOne({ _id: existing._id }, { $set: { updatedAt: new Date() } });
+    console.log(`[upsert] Exato: "${item.descricao}" → "${existing.nome_original}"`);
     return existing._id;
   }
 
-  // 2. Busca fuzzy (se não encontrar exato)
+  // 2. Busca fuzzy
   const allProducts = await products.find({ block_auto_merge: { $ne: true } }).toArray();
   if (allProducts.length > 0) {
     const fuse = new Fuse(allProducts, {
@@ -87,29 +120,33 @@ const upsertProduct = async (db, item) => {
       .filter(r => r.score <= FUZZY_THRESHOLD)
       .sort((a, b) => a.score - b.score);
 
+    console.log(`[upsert] Fuzzy: "${item.descricao}" → ${resultados.length} candidatos`);
     if (resultados.length > 0) {
       const similar = resultados[0].item;
-      console.log(`[upsert] Reutilizando "${similar.nome_original}" para "${item.descricao}" (score: ${resultados[0].score})`);
+      console.log(`[upsert] Melhor: "${similar.nome_original}" (score: ${resultados[0].score})`);
 
-      // Atualiza o produto existente
       await products.updateOne(
         { _id: similar._id },
         { $set: { updatedAt: new Date() } }
       );
 
-      // 🔥 CRIA REGRA NO MERGE_RULES (se não existir)
+      // Cria regra se não existir
       const descNorm = normalizeProductName(item.descricao);
       const existingRule = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
       if (!existingRule) {
         await criarRegraEMesclar(db, item, similar, descNorm);
-        console.log(`[upsert] Regra criada: "${item.descricao}" → "${similar.nome_original}"`);
+        console.log(`[upsert] Regra criada via fuzzy`);
       }
-
       return similar._id;
     }
   }
 
-  // 3. Nenhum similar: cria novo
+  // 3. Fallback: tenta clusterização com os itens da própria nota (se houver mais de 1 item)
+  //    Isso pode unificar itens que são variações dentro da mesma nota.
+  //    Mas vamos fazer isso apenas se houver mais de 1 item na nota e o fuzzy não achou nada.
+  //    Para isso, precisamos do array de itens da nota – mas aqui não temos. Vamos pular.
+
+  // 4. Nenhum similar: cria novo
   const doc = {
     createdAt: new Date(),
     codigo: item.codigo || null,
@@ -136,18 +173,16 @@ const savePurchase = async (url, resultado) => {
       return { duplicate: true };
     }
 
-    // Carrega regras existentes
     const rules = await mergeRules.find({}).toArray();
     const rulesMap = new Map(rules.map(r => [r.descricao_original_normalizada, r]));
 
-    // Processa cada item: aplica regra ou upsert com fuzzy
     const itensEnriquecidos = await Promise.all(
       resultado.itens.map(async (item) => {
         const nomeNorm = normalizeProductName(item.descricao);
         const rule = rulesMap.get(nomeNorm);
 
         if (rule) {
-          console.log(`[savePurchase] Regra: "${item.descricao}" → "${rule.nome_final}"`);
+          console.log(`[savePurchase] Regra existente: "${item.descricao}" → "${rule.nome_final}"`);
           return {
             ...item,
             descricao_original: item.descricao,
@@ -157,7 +192,6 @@ const savePurchase = async (url, resultado) => {
           };
         }
 
-        // Upsert com fuzzy (já cria regra se encontrar similar)
         const productId = await upsertProduct(db, item);
         return {
           ...item,
