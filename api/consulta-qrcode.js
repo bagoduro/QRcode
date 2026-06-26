@@ -35,7 +35,6 @@ function saoProdutosSimilares(desc1, desc2) {
   const palavras1 = extrairPalavrasChave(desc1);
   const palavras2 = extrairPalavrasChave(desc2);
   if (palavras1.length === 0 || palavras2.length === 0) return false;
-  // Pelo menos uma palavra-chave em comum
   return palavras1.some(p => palavras2.includes(p));
 }
 
@@ -57,7 +56,6 @@ function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
       .filter(r => r.score <= threshold)
       .map(r => r.item);
 
-    // 🔥 FILTRO EXTRA: só aceita se compartilharem palavras-chave
     const filtrados = achados.filter(item =>
       saoProdutosSimilares(ancora.descricao, item.descricao)
     );
@@ -79,9 +77,16 @@ function sugerirGrupoDuplicado(lista, threshold = CLUSTER_THRESHOLD) {
 async function criarRegraEMesclar(db, item, ancora, descNorm) {
   const mergeRules = db.collection('merge_rules');
   const purchases = db.collection('purchases');
+  const products = db.collection('products');
 
   const existing = await mergeRules.findOne({ descricao_original_normalizada: descNorm });
   if (existing) return;
+
+  // 🔥 BLOQUEIA O ÂNCORA (produto final)
+  await products.updateOne(
+    { _id: ancora._id },
+    { $set: { block_auto_merge: true, updatedAt: new Date() } }
+  );
 
   await mergeRules.updateOne(
     { descricao_original_normalizada: descNorm },
@@ -127,6 +132,12 @@ async function mesclarGrupo(db, grupo) {
 
   const ancora = grupo.ancora;
   const itens = grupo.itens;
+
+  // 🔥 BLOQUEIA O ÂNCORA (produto final)
+  await products.updateOne(
+    { _id: ancora._id },
+    { $set: { block_auto_merge: true, updatedAt: new Date() } }
+  );
 
   for (const item of itens) {
     if (item._id.toString() === ancora._id.toString()) continue;

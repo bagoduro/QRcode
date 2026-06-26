@@ -35,7 +35,6 @@ function sugerirGrupoDuplicado(lista, threshold = DEFAULT_THRESHOLD) {
       .filter((r) => r.score <= threshold)
       .map((r) => r.item);
 
-    // 🔥 LIMITE: só forma grupo se tiver entre 2 e MAX_GROUP_SIZE itens
     if (achados.length >= 2 && achados.length <= MAX_GROUP_SIZE) {
       const grupo = { ancora, itens: achados };
       if (!melhorGrupo || grupo.itens.length > melhorGrupo.itens.length) {
@@ -121,6 +120,12 @@ export default async function handler(req, res) {
         { upsert: true }
       );
       const produtoCanonico = await products.findOne({ nome_normalizado: nomeFinalNorm });
+
+      // 🔥 BLOQUEIA O ÂNCORA
+      await products.updateOne(
+        { _id: produtoCanonico._id },
+        { $set: { block_auto_merge: true, updatedAt: new Date() } }
+      );
 
       for (const descOriginal of descricoesOriginais) {
         if (normalizeProductName(descOriginal) === nomeFinalNorm) continue;

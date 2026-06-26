@@ -240,7 +240,13 @@ export default async function handler(req, res) {
       const blocked = prodDoc?.block_auto_merge === true;
 
       const mergeRules = db.collection('merge_rules');
-      const regraAtiva = nomeProdNorm ? await mergeRules.findOne({ nome_final_normalizado: nomeProdNorm }) : null;
+      // 🔥 MODIFICAÇÃO: verifica se o produto é destino OU origem de uma mesclagem
+      const regraAtiva = nomeProdNorm ? await mergeRules.findOne({
+        $or: [
+          { nome_final_normalizado: nomeProdNorm },
+          { descricao_original_normalizada: nomeProdNorm }
+        ]
+      }) : null;
 
       return res.json({
         produto: produto || codigo,
