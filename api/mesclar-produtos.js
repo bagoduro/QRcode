@@ -97,7 +97,6 @@ export default async function handler(req, res) {
       }
 
       const nomeFinalNorm = regra.nome_final_normalizado;
-      const nomeFinal = regra.nome_final;
 
       // Busca TODAS as regras deste grupo
       const todasRegras = await mergeRules.find({ nome_final_normalizado: nomeFinalNorm }).toArray();
@@ -113,7 +112,7 @@ export default async function handler(req, res) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
-        // 1. Garante que o produto original existe (ou é criado) com block_auto_merge: false
+        // 1. Garante que o produto original existe (ou é criado) com block_auto_merge: true (BLOQUEADO)
         await products.updateOne(
           { nome_normalizado: descOriginalNorm },
           {
@@ -122,7 +121,7 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
-              block_auto_merge: false
+              block_auto_merge: true   // <-- BLOQUEADO
             },
           },
           { upsert: true }
@@ -147,10 +146,10 @@ export default async function handler(req, res) {
         originaisRecuperados.push(descOriginal);
       }
 
-      // 3. Remove o bloqueio do produto final (âncora)
+      // 3. BLOQUEIA também o produto final (âncora) para evitar re-mesclagem
       await products.updateOne(
         { nome_normalizado: nomeFinalNorm },
-        { $set: { block_auto_merge: false, updatedAt: new Date() } }
+        { $set: { block_auto_merge: true, updatedAt: new Date() } }
       );
 
       // 4. Remove TODAS as regras do grupo
