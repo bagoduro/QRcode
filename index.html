@@ -60,13 +60,6 @@
       margin-top: 2px;
     }
 
-    /* Auth user block (hidden by default) moved from inline styles */
-    #auth-user {
-      display: none;
-      align-items: center;
-      gap: 8px;
-    }
-
     .user-chip span {
       font-size: 13px;
       font-weight: 500;
@@ -358,11 +351,6 @@
 
     .scan-success.show { display: flex; }
 
-    #qr-video {
-      width: 100%;
-      display: block;
-    }
-
     .result-row {
       display: flex;
       justify-content: space-between;
@@ -576,6 +564,61 @@
       margin-top: 8px;
     }
 
+    /* ---------- Aviso de acesso restrito (aba Recorrentes) ---------- */
+    .auth-gate {
+      text-align: center;
+      padding: 2rem 1rem 1rem;
+    }
+
+    .auth-gate-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1rem;
+    }
+
+    .auth-gate-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 6px;
+    }
+
+    .auth-gate-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin: 0 0 1.25rem;
+    }
+
+    .auth-gate-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+
+    .btn-gate {
+      display: inline-flex;
+      align-items: center;
+      height: 36px;
+      padding: 0 16px;
+      border: 0.5px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+
+    .btn-gate:hover { background: var(--bg-secondary); }
+    .btn-gate.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-gate.primary:hover { background: #0c5a45; }
+
     @media (max-width: 480px) {
       nav.tabs button span { display: none; }
       .summary-grid { grid-template-columns: 1fr 1fr; }
@@ -662,7 +705,7 @@
           <a href="/cadastro.html" class="btn-auth primary">Cadastrar</a>
         </div>
         <!-- Exibido quando esta logado -->
-        <div id="auth-user">
+        <div id="auth-user" style="display:none; align-items:center; gap:8px;">
           <span id="user-name"></span>
           <button id="btn-logout" class="btn-icon" title="Sair" aria-label="Sair">
             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -694,7 +737,7 @@
             <i class="ti ti-player-play"></i> Iniciar câmera
           </button>
           <div class="scanner-wrapper" id="scanner-wrapper">
-            <video id="qr-video" autoplay muted></video>
+            <video id="qr-video" style="width:100%; display:block;" autoplay muted playsinline></video>
             <div class="scanner-overlay">
               <div class="scanner-box">
                 <div class="scan-line"></div>
@@ -756,7 +799,7 @@
         <button class="btn primary full" id="btn-carregar-recorrentes">
           <i class="ti ti-refresh"></i> Carregar
         </button>
-        <div id="recorrentes-result"></div>
+        <div id="recorrentes-result" style="margin-top: 1rem;"></div>
       </div>
     </section>
 
@@ -767,7 +810,7 @@
         <button class="btn full" id="btn-carregar-historico">
           <i class="ti ti-refresh"></i> Atualizar lista
         </button>
-        <div id="historico-result"></div>
+        <div id="historico-result" style="margin-top: 1rem;"></div>
       </div>
     </section>
   </div>
@@ -795,15 +838,40 @@
     // API_BASE já está declarado em auth-client.js (carregado acima).
 
     // ---------- Navegação entre abas ----------
+    // Abas que exigem login. Ao clicar, verifica sessao e exibe aviso se necessario.
+    const ABAS_RESTRITAS = ['recorrentes', 'historico'];
+
     const tabButtons = document.querySelectorAll('.tab-btn');
     const panels = document.querySelectorAll('.panel');
 
     tabButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
+        const aba = btn.dataset.tab;
+
         tabButtons.forEach((b) => b.classList.remove('active'));
         panels.forEach((p) => p.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+        document.getElementById('panel-' + aba).classList.add('active');
+
+        // Se a aba e restrita e o usuario nao esta logado, substitui o conteudo
+        // por um aviso com links para login/cadastro.
+        if (ABAS_RESTRITAS.includes(aba) && !getToken()) {
+          document.getElementById(aba + '-result').innerHTML = `
+            <div class="auth-gate">
+              <div class="auth-gate-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+              </div>
+              <p class="auth-gate-title">Recurso exclusivo para membros</p>
+              <p class="auth-gate-desc">Fa&ccedil;a login ou cadastre-se gratuitamente para ver seus itens recorrentes.</p>
+              <div class="auth-gate-actions">
+                <a href="/login.html" class="btn-gate">Entrar</a>
+                <a href="/cadastro.html" class="btn-gate primary">Criar conta</a>
+              </div>
+            </div>`;
+        }
       });
     });
 
