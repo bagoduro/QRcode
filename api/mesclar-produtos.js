@@ -108,7 +108,7 @@ export default async function handler(req, res) {
       let totalRestaurados = 0;
       const originaisRecuperados = [];
 
-      // Restaura cada origem
+      // 🔥 CORREÇÃO: para cada origem, restaura APENAS os itens que têm descricao_original igual a essa origem
       for (const r of todasRegras) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
@@ -129,34 +129,8 @@ export default async function handler(req, res) {
         );
         const prodOriginal = await products.findOne({ nome_normalizado: descOriginalNorm });
 
-        // 2. Atualiza as compras que têm o nome mesclado (primeiro: itens com descricao = nomeFinal)
-        const result1 = await purchases.updateMany(
-          {},
-          {
-            $set: {
-              'itens.$[elem].descricao': descOriginal,
-              'itens.$[elem].descricao_normalizada': descOriginalNorm,
-              'itens.$[elem].product_id': prodOriginal._id
-            },
-            $unset: { 'itens.$[elem].descricao_original': "" }
-          },
-          { arrayFilters: [{ 'elem.descricao': nomeFinal }] }
-        );
-
-        // 3. Também atualiza itens que já podem ter sido parcialmente restaurados (descricao = descOriginal)
-        const result2 = await purchases.updateMany(
-          {},
-          {
-            $set: {
-              'itens.$[elem].product_id': prodOriginal._id
-            },
-            $unset: { 'itens.$[elem].descricao_original': "" }
-          },
-          { arrayFilters: [{ 'elem.descricao': descOriginal }] }
-        );
-
-        // 4. Atualiza itens que ainda tenham o campo descricao_original definido com o valor antigo
-        const result3 = await purchases.updateMany(
+        // 2. Atualiza SOMENTE os itens cujo descricao_original corresponde a esta origem
+        const updateResult = await purchases.updateMany(
           {},
           {
             $set: {
@@ -169,17 +143,17 @@ export default async function handler(req, res) {
           { arrayFilters: [{ 'elem.descricao_original': descOriginal }] }
         );
 
-        totalRestaurados += result1.modifiedCount + result2.modifiedCount + result3.modifiedCount;
+        totalRestaurados += updateResult.modifiedCount;
         originaisRecuperados.push(descOriginal);
       }
 
-      // 5. Remove o bloqueio do produto final (âncora)
+      // 3. Remove o bloqueio do produto final (âncora)
       await products.updateOne(
         { nome_normalizado: nomeFinalNorm },
         { $set: { block_auto_merge: false, updatedAt: new Date() } }
       );
 
-      // 6. Remove TODAS as regras do grupo
+      // 4. Remove TODAS as regras do grupo
       const deleteResult = await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
       return res.json({
@@ -219,6 +193,7 @@ export default async function handler(req, res) {
 
     let totalAtualizados = 0;
     for (const descricao of descricoes) {
+      // Guarda o nome original antes de sobrescrever
       await purchases.updateMany(
         { 'itens.descricao': descricao, 'itens.descricao_original': { $exists: false } },
         {
