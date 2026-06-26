@@ -23,19 +23,30 @@ export default async function handler(req, res) {
             nome_final_normalizado: key,
             atualizado_em: r.updatedAt || r.createdAt || null,
             origens: [],
+            origens_origem: new Set(),
           });
         }
         const grupo = grupos.get(key);
         grupo.origens.push({
           descricao: r.descricao_original,
           mesclado_em: r.updatedAt || r.createdAt || null,
+          origem: r.origem || 'desconhecida',
         });
+        grupo.origens_origem.add(r.origem || 'desconhecida');
         if (r.updatedAt && (!grupo.atualizado_em || r.updatedAt > grupo.atualizado_em)) {
           grupo.atualizado_em = r.updatedAt;
         }
       }
 
-      const gruposArray = [...grupos.values()];
+      const gruposArray = [...grupos.values()].map(g => {
+        const origensSet = g.origens_origem;
+        delete g.origens_origem;
+        return {
+          ...g,
+          origem_do_grupo: origensSet.size === 1 ? origensSet.values().next().value : 'multiplas',
+        };
+      });
+
       const normas = gruposArray.map(g => g.nome_final_normalizado);
       const produtos = await db.collection('products').find({ nome_normalizado: { $in: normas } }).toArray();
       const blockedMap = new Map(produtos.map(p => [p.nome_normalizado, p.block_auto_merge === true]));
@@ -75,6 +86,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Informe a "descricao_mesclada" para desfazer.' });
       }
 
+      // Busca a regra principal (pode ser por nome_final ou nome_final_normalizado)
       let regra = await mergeRules.findOne({ nome_final: descricao_mesclada });
       if (!regra) {
         const descNorm = norm(descricao_mesclada);
@@ -85,7 +97,9 @@ export default async function handler(req, res) {
       }
 
       const nomeFinalNorm = regra.nome_final_normalizado;
+      const nomeFinal = regra.nome_final;
 
+      // Busca TODAS as regras deste grupo
       const todasRegras = await mergeRules.find({ nome_final_normalizado: nomeFinalNorm }).toArray();
       if (todasRegras.length === 0) {
         return res.status(404).json({ error: 'Nenhuma regra de mesclagem encontrada para este grupo.' });
@@ -94,11 +108,12 @@ export default async function handler(req, res) {
       let totalRestaurados = 0;
       const originaisRecuperados = [];
 
+      // Restaura cada origem
       for (const r of todasRegras) {
         const descOriginal = r.descricao_original;
         const descOriginalNorm = r.descricao_original_normalizada || norm(descOriginal);
 
-        // BLOQUEIA ao desfazer
+        // 1. Garante que o produto original existe (ou é criado) com block_auto_merge: false
         await products.updateOne(
           { nome_normalizado: descOriginalNorm },
           {
@@ -107,17 +122,21 @@ export default async function handler(req, res) {
               nome_original: descOriginal,
               nome_normalizado: descOriginalNorm,
               updatedAt: new Date(),
-              block_auto_merge: true
+              block_auto_merge: false
             },
           },
           { upsert: true }
         );
         const prodOriginal = await products.findOne({ nome_normalizado: descOriginalNorm });
 
+        // 2. Atualiza TODAS as compras que têm esse nome mesclado
         const updateResult = await purchases.updateMany(
           {
-            'itens.descricao_original': descOriginal,
-            'itens.descricao': regra.nome_final
+            $or: [
+              { 'itens.descricao': nomeFinal },
+              { 'itens.descricao': descOriginal },
+              { 'itens.descricao_original': descOriginal }
+            ]
           },
           {
             $set: {
@@ -129,18 +148,33 @@ export default async function handler(req, res) {
               'itens.$[elem].descricao_original': ""
             }
           },
-          { arrayFilters: [{ 'elem.descricao_original': descOriginal }] }
+          { arrayFilters: [
+              { $or: [
+                  { 'elem.descricao': nomeFinal },
+                  { 'elem.descricao': descOriginal },
+                  { 'elem.descricao_original': descOriginal }
+                ] }
+            ]
+          }
         );
         totalRestaurados += updateResult.modifiedCount;
         originaisRecuperados.push(descOriginal);
       }
 
-      await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
+      // 3. Remove o bloqueio do produto final (âncora)
+      await products.updateOne(
+        { nome_normalizado: nomeFinalNorm },
+        { $set: { block_auto_merge: false, updatedAt: new Date() } }
+      );
+
+      // 4. Remove TODAS as regras do grupo
+      const deleteResult = await mergeRules.deleteMany({ nome_final_normalizado: nomeFinalNorm });
 
       return res.json({
         ok: true,
         mensagem: 'Mesclagem desfeita com sucesso.',
         itens_restaurados: totalRestaurados,
+        regras_removidas: deleteResult.deletedCount,
         originais_recuperados: originaisRecuperados
       });
     }
@@ -156,7 +190,6 @@ export default async function handler(req, res) {
     const nomeFinal     = nome_final.trim();
     const nomeFinalNorm = norm(nomeFinal);
 
-    // 🔥 MUDANÇA: mesclagem manual também BLOQUEIA o produto final
     await products.updateOne(
       { nome_normalizado: nomeFinalNorm },
       {
@@ -165,7 +198,7 @@ export default async function handler(req, res) {
           nome_original: nomeFinal,
           nome_normalizado: nomeFinalNorm,
           updatedAt: new Date(),
-          block_auto_merge: true   // <-- agora bloqueia
+          block_auto_merge: true
         },
       },
       { upsert: true }
@@ -224,13 +257,6 @@ export default async function handler(req, res) {
       );
     }
 
-    // 🔥 CASCATA: se algum dos nomes mesclados agora (ex: "C") já era o
-    // nome_final de mesclagens anteriores (ex: A→C, B→C), essas regras
-    // antigas precisam ser redirecionadas para o novo nome final ("E"),
-    // senão continuam apontando para um nome/produto que acabou de ser
-    // absorvido (e cujo produto canônico foi deletado acima). Sem isso,
-    // notas futuras com descrição "A" ou "B" voltam a cair em "C" em vez
-    // de se juntar ao grupo "E".
     if (descNormsAntigas.length > 0) {
       await mergeRules.updateMany(
         { nome_final_normalizado: { $in: descNormsAntigas } },
