@@ -1,7 +1,35 @@
 import 'dotenv/config';
 import express from 'express';
-import { load } from 'cheerio';
-import { getDb } from './db.js';
+
+import authController, { verifyJwt } from './controllers/authController.js';
+import consultaQrcodeController from './controllers/consultaQrcodeController.js';
+import produtosController from './controllers/produtosController.js';
+import mesclarProdutosController from './controllers/mesclarProdutosController.js';
+import historicoComprasController from './controllers/historicoComprasController.js';
+import criarProdutosController from './controllers/criarProdutosController.js';
+import migrateController from './controllers/migrateController.js';
+import restaurarNomesController from './controllers/restaurarNomesController.js';
+import toggleBlockController from './controllers/toggleBlockController.js';
+import desbloquearTodosController from './controllers/desbloquearTodosController.js';
+import fixBlockController from './controllers/fixBlockController.js';
+import healthController from './controllers/healthController.js';
+import blacklistController from './controllers/blacklistController.js';
+
+// ─── server.js ────────────────────────────────────────────────────────────
+// Servidor Express para desenvolvimento local. Não reimplementa nenhuma
+// lógica: apenas monta as mesmas rotas/Controllers usados pelas funções
+// serverless em /api. Isso elimina a duplicação que existia antes (a mesma
+// lógica de negócio vivia, ao mesmo tempo, aqui e em cada arquivo de /api).
+
+function requireAuth(req, res, next) {
+  const auth = req.headers?.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Não autenticado.' });
+  const payload = verifyJwt(token);
+  if (!payload) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  req.user = payload;
+  next();
+}
 
 const app = express();
 const port = process.env.PORT || 3333;
@@ -9,207 +37,36 @@ const port = process.env.PORT || 3333;
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   next();
 });
 
-const normalizeText = (text = '') => text.replace(/\s+/g, ' ').trim();
+// ── Rotas públicas (espelham as funções serverless de /api) ────────────────
+app.all('/consulta-qrcode', consultaQrcodeController);
+app.all('/api/consulta-qrcode', consultaQrcodeController);
+app.get('/health', healthController);
+app.get('/api/health', healthController);
+app.get('/historico-compras', historicoComprasController);
+app.get('/api/historico-compras', historicoComprasController);
+app.get('/produtos', produtosController);
+app.get('/api/produtos', produtosController);
+app.all('/api/auth', authController);
 
-const parseItemRow = (row, $) => {
-  const cols = $(row)
-    .find('td')
-    .toArray()
-    .map((td) => normalizeText($(td).text()));
-  if (cols.length < 4) return null;
-
-  const itemMatch = cols[0].match(/^(.*?)\s*\(Código:\s*([^\)]+)\)/i);
-  return {
-    descricao: itemMatch ? normalizeText(itemMatch[1]) : cols[0],
-    codigo: itemMatch ? normalizeText(itemMatch[2]) : null,
-    quantidade: cols[1].replace(/.*?:\s*/, ''),
-    unidade: cols[2].replace(/.*?:\s*/, ''),
-    valor_total: cols[3].replace(/.*?:\s*/, ''),
-  };
-};
-
-const savePurchase = async (url, resultado) => {
-  try {
-    console.log('[savePurchase] Iniciando salvamento...', { url });
-    const db = await getDb();
-    console.log('[savePurchase] Conectado ao banco');
-    const purchases = db.collection('purchases');
-    const purchase = {
-      url,
-      createdAt: new Date(),
-      emitente: resultado.emitente,
-      nota: resultado.nota,
-      chave_acesso: resultado.chave_acesso,
-      totais: resultado.totais,
-      itens: resultado.itens,
-    };
-
-    const result = await purchases.insertOne(purchase);
-    console.log('[savePurchase] Documento inserido com sucesso:', result.insertedId);
-  } catch (error) {
-    console.error('[savePurchase] Erro ao salvar:', error.message, error.stack);
-    throw error;
-  }
-};
-
-const extractTableRow = ($table, $) => {
-  const row = $table.find('tbody tr').first();
-  return row.find('td').toArray().map((td) => normalizeText($(td).text()));
-};
-
-const parseHtml = (html) => {
-  const $ = load(html);
-
-  const emitenteSection = $("h5:contains('Emitente')").first();
-  const emitenteTable = emitenteSection.nextAll('table').first();
-  const emitenteCells = extractTableRow(emitenteTable, $);
-
-  const dataEmissaoTable = $("th:contains('Data Emissão')").closest('table');
-  const dataEmissaoCells = extractTableRow(dataEmissaoTable, $);
-
-  const valorTotalServicoTable = $("th:contains('Valor total do serviço')").closest('table');
-  const valorTotalServicoCells = extractTableRow(valorTotalServicoTable, $);
-
-  const protocoloTable = $("th:contains('Protocolo')").closest('table');
-  const protocoloCells = extractTableRow(protocoloTable, $);
-
-  const chaveAcessoPanel = $(".panel-title:contains('Chave de acesso')")
-    .closest('.panel')
-    .find('div.collapse tbody tr td')
-    .first();
-  const chaveAcesso = normalizeText(chaveAcessoPanel.text());
-
-  const totals = {};
-  $('div.row').each((_, element) => {
-    const strongs = $(element)
-      .find('strong')
-      .toArray()
-      .map((el) => normalizeText($(el).text()));
-    if (strongs.length === 2 && strongs[0] !== strongs[1]) {
-      totals[strongs[0]] = strongs[1];
-    }
-  });
-
-  const itens = [];
-  $('#myTable tr').each((_, row) => {
-    const item = parseItemRow(row, $);
-    if (item) itens.push(item);
-  });
-
-  return {
-    emitente: {
-      nome: emitenteCells[0] || null,
-      cnpj: emitenteCells[1] || null,
-      inscricao_estadual: emitenteCells[2] || null,
-      uf: emitenteCells[3] || null,
-    },
-    nota: {
-      modelo: dataEmissaoCells[0] || null,
-      serie: dataEmissaoCells[1] || null,
-      numero: dataEmissaoCells[2] || null,
-      data_emissao: dataEmissaoCells[3] || null,
-      valor_total_servico: valorTotalServicoCells[0] || null,
-      protocolo: protocoloCells[0] || null,
-    },
-    chave_acesso: chaveAcesso || null,
-    totais: {
-      quantidade_total_itens: totals['Qtde total de ítens'] || null,
-      valor_total: totals['Valor total R$'] || null,
-      valor_pago: totals['Valor pago R$'] || null,
-      forma_pagamento: totals['Forma de Pagamento'] || null,
-    },
-    itens,
-  };
-};
-
-const fetchAndParseUrl = async (url) => {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    },
-  });
-
-  if (!response.ok) {
-    const message = `Falha ao obter a página da SEFAZ-MG: ${response.status} ${response.statusText}`;
-    throw new Error(message);
-  }
-
-  const html = await response.text();
-  return parseHtml(html);
-};
-
-app.post('/consulta-qrcode', async (req, res) => {
-  const { url } = req.body;
-  console.log('[POST /consulta-qrcode] Requisição recebida:', { url });
-  
-  if (!url) {
-    return res.status(400).json({ error: 'A propriedade "url" é obrigatória.' });
-  }
-
-  try {
-    new URL(url);
-  } catch (error) {
-    return res.status(400).json({ error: 'URL inválida.' });
-  }
-
-  try {
-    const resultado = await fetchAndParseUrl(url);
-    await savePurchase(url, resultado);
-    return res.json(resultado);
-  } catch (error) {
-    console.error('[POST /consulta-qrcode] Erro:', error.message);
-    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
-  }
-});
-
-app.get('/', (req, res) => {
-  res.type('text/plain').send(
-    'API NFC-e backend. Use GET /consulta-qrcode?url=<URL> ou POST /consulta-qrcode com { "url": "..." }'
-  );
-});
-
-app.get('/consulta-qrcode', async (req, res) => {
-  const { url } = req.query;
-  console.log('[GET /consulta-qrcode] Requisição recebida:', { url });
-  
-  if (!url) {
-    return res.status(400).json({ error: 'O parâmetro "url" é obrigatório.' });
-  }
-
-  try {
-    new URL(url);
-  } catch (error) {
-    return res.status(400).json({ error: 'URL inválida.' });
-  }
-
-  try {
-    const resultado = await fetchAndParseUrl(url);
-    await savePurchase(url, resultado);
-    return res.json(resultado);
-  } catch (error) {
-    console.error('[GET /consulta-qrcode] Erro:', error.message);
-    return res.status(500).json({ error: 'Erro interno no servidor.', details: error.message });
-  }
-});
-
-app.get('/health', async (req, res) => {
-  try {
-    const db = await getDb();
-    await db.command({ ping: 1 });
-    res.json({ status: 'ok', db: 'connected' });
-  } catch (error) {
-    res.status(500).json({ status: 'error', error: error.message });
-  }
-});
+// ── Rotas protegidas (exigem Bearer token) ──────────────────────────────────
+app.delete('/historico-compras', requireAuth, historicoComprasController);
+app.delete('/api/historico-compras', requireAuth, historicoComprasController);
+app.post('/api/migrate', requireAuth, migrateController);
+app.get('/api/auto-merge-blacklist', requireAuth, blacklistController);
+app.post('/api/toggle-block', requireAuth, toggleBlockController);
+app.post('/mesclar-produtos', requireAuth, mesclarProdutosController);
+app.post('/api/mesclar-produtos', requireAuth, mesclarProdutosController);
+app.get('/api/mesclar-produtos', requireAuth, mesclarProdutosController);
+app.post('/api/criar-produtos', requireAuth, criarProdutosController);
+app.post('/api/restaurar-nomes', requireAuth, restaurarNomesController);
+app.post('/api/desbloquear-todos', requireAuth, desbloquearTodosController);
+app.post('/api/fix-block', requireAuth, fixBlockController);
 
 app.listen(port, () => {
-  console.log(`Backend NFC-e rodando em http://localhost:${port}`);
-  console.log('[Startup] Variáveis de ambiente:');
-  console.log('[Startup] PORT:', port);
-  console.log('[Startup] MONGO_URI definida:', !!process.env.MONGO_URI);
-  console.log('[Startup] MONGO_DB_NAME:', process.env.MONGO_DB_NAME || 'leitor_qr (padrão)');
+  console.log(`Servidor local rodando em http://localhost:${port}`);
 });
